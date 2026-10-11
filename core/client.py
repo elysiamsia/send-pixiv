@@ -131,8 +131,13 @@ class PixivClient:
         self._gate_lock = asyncio.Lock()
         self._last_call = 0.0
 
-        stored_token = token_store.refresh_token() if token_store else ""
-        self._refresh_token = refresh_token.strip() or stored_token
+        # 配置里的值只是 bootstrap：轮换后的新 token 落在 token_store 里，默认以它为准。
+        self._configured_refresh_token = refresh_token.strip()
+        self._refresh_token = (
+            token_store.resolve_refresh_token(self._configured_refresh_token)
+            if token_store
+            else self._configured_refresh_token
+        )
         self._access_token = access_token.strip() or (
             token_store.access_token() if token_store else ""
         )
@@ -193,8 +198,8 @@ class PixivClient:
                     # 只给了 access_token：无从刷新，用到 401 为止。
                     return self._access_token
                 raise PixivAuthError(
-                    "未配置 pixiv 凭据：请在插件配置里填写 refresh_token"
-                    "（可用 PixivFlow 的 login 流程导出）"
+                    "未配置 pixiv 凭据：请先跑 python scripts/pixiv_login.py 完成一次浏览器授权，"
+                    "或把 refresh_token 填进插件配置"
                 )
 
             return await self._refresh_access_token()
@@ -261,6 +266,7 @@ class PixivClient:
                     refresh_token=self._refresh_token,
                     access_token=self._access_token,
                     expires_at=self._access_token_expires,
+                    config_refresh_token=self._configured_refresh_token,
                 )
             return self._access_token
 

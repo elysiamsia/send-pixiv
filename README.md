@@ -63,9 +63,23 @@ refresh_token = "你的 refresh_token"
 proxy = "http://127.0.0.1:7890"   # 能直连 pixiv 就留空
 ```
 
-拿 refresh_token 的办法（任选其一）：用 PixivFlow 跑一次 `pixivflow login`，
-它会打印 token；或者用任意 pixiv OAuth PKCE 工具跑一次授权。
-**注意 token 等同于账号凭据，不要提交到仓库、不要发到群里。**
+### 怎么拿 refresh_token
+
+仓库自带一个登录助手，跑一次浏览器授权就行：
+
+```bash
+python scripts/pixiv_login.py --proxy http://127.0.0.1:7890
+```
+
+它会打印一个 pixiv 登录地址 → 你在浏览器里登录（已登录的话点一下就行）→
+页面最后会跳到 `pixiv://account/login?code=...`，浏览器打不开这种协议没关系，
+**把地址栏那一整条 URL 复制回终端**即可。脚本会拿 code 换令牌，并写进
+`data/send-pixiv/token.json`（插件运行期直接用它）。
+
+也可以分两步走：`--url-only` 只生成地址，拿到 code 后再 `--code "<粘贴内容>"`。
+
+> **注意**：refresh_token 等同于账号凭据。它既在 `token.json` 里，也可能被你填进
+> `config.toml`——这两个文件都别提交进仓库、别发到群里。
 
 完整配置项见 [docs/config.md](docs/config.md)。
 

@@ -30,7 +30,10 @@ class SendPixivConfig(BaseConfig):
         )
         allowed_streams: list[str] = Field(
             default_factory=list,
-            description="允许使用本插件的聊天流 ID 白名单，留空表示所有会话都允许",
+            description=(
+                "允许使用本插件的聊天流 ID 白名单，留空表示所有会话都允许。"
+                "stream_id 是框架对会话做的 SHA-256 哈希（不是群号），开 debug 日志发一次图就能看到"
+            ),
         )
         blocked_streams: list[str] = Field(
             default_factory=list,
@@ -54,18 +57,17 @@ class SendPixivConfig(BaseConfig):
             ge=0,
             description="同一会话每天最多成功发图次数，0 表示不限制",
         )
-        chat_stream_hint: str = Field(
-            default="",
-            description="占位项，无实际作用：stream_id 是 SHA-256 哈希，可在 bot 日志里查看",
-        )
-
     @config_section("pixiv")
     class PixivSection(SectionBase):
         """pixiv 凭据与网络。"""
 
         refresh_token: str = Field(
             default="",
-            description="pixiv 账号的 refresh_token（必填）。可用 PixivFlow 的 login 流程导出",
+            description=(
+                "pixiv 账号的 refresh_token（必填）。"
+                "用本仓库的 python scripts/pixiv_login.py 跑一次浏览器授权即可拿到；"
+                "也可以留空，直接让登录脚本把 token 写进 token_path"
+            ),
         )
         access_token: str = Field(
             default="",
