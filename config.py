@@ -118,8 +118,12 @@ class SendPixivConfig(BaseConfig):
             description="缓存保留的最大文件数，0 表示不限制",
         )
         image_quality: str = Field(
-            default="large",
-            description="发送质量：large（长边约 1200px，推荐）/ original（原图，体积大）",
+            default="master1200",
+            description=(
+                "发送质量：master1200（约 1200px 的 JPEG，几百 KB，推荐）/ "
+                "large（600x1200 的 webp 缩略图，只有十几 KB）/ original（原图，动辄好几 MB）。"
+                "前一个档位不存在时会自动往后退"
+            ),
         )
         max_images_per_request: int = Field(
             default=2,

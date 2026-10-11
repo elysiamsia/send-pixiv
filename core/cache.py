@@ -36,31 +36,37 @@ class ImageCache:
         """确保缓存目录存在。"""
         self.root.mkdir(parents=True, exist_ok=True)
 
-    def path_for(self, illust_id: int, page: int = 0, suffix: str = "") -> Path:
+    def path_for(self, illust_id: int, page: int = 0, suffix: str = "", quality: str = "") -> Path:
         """计算某个作品某一页的缓存路径。
+
+        路径按**档位**分目录：`<作品ID>/<档位>/<页码><后缀>`。
+        否则改了 `image_quality` 之后，命中的还是按旧档位下载的文件——
+        这个坑实测踩过一次：配置改成 master1200，发出来的仍然是上一次的 webp 缩略图。
 
         Args:
             illust_id: 作品 ID。
             page: 页码，从 0 开始。
             suffix: 文件后缀，需以点开头；留空时用 `SUFFIX_FALLBACK`。
+            quality: 图片档位名，会做一次安全化处理。
 
         Returns:
             目标文件路径。
         """
         safe_suffix = suffix if suffix.startswith(".") and len(suffix) <= 5 else self.SUFFIX_FALLBACK
-        return self.root / str(illust_id) / f"{page}{safe_suffix}"
+        return self.root / str(illust_id) / _safe_segment(quality) / f"{page}{safe_suffix}"
 
-    def find(self, illust_id: int, page: int = 0) -> Path | None:
+    def find(self, illust_id: int, page: int = 0, quality: str = "") -> Path | None:
         """查找已经下载好的某一页。
 
         Args:
             illust_id: 作品 ID。
             page: 页码。
+            quality: 图片档位名。
 
         Returns:
             命中的文件路径；未命中返回 `None`。
         """
-        directory = self.root / str(illust_id)
+        directory = self.root / str(illust_id) / _safe_segment(quality)
         if not directory.is_dir():
             return None
         for candidate in sorted(directory.glob(f"{page}.*")):
@@ -107,6 +113,19 @@ class ImageCache:
         if not self.root.is_dir():
             return 0
         return sum(_size(item) for item in self.root.rglob("*") if item.is_file())
+
+
+def _safe_segment(value: str) -> str:
+    """把档位名收敛成一个安全的目录名。
+
+    Args:
+        value: 原始档位名。
+
+    Returns:
+        只含字母数字与 `_-` 的目录名；空值时用 `default`。
+    """
+    cleaned = "".join(ch for ch in (value or "") if ch.isalnum() or ch in "_-").strip()
+    return cleaned[:32] or "default"
 
 
 def _mtime(path: Path) -> float:

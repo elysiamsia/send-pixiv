@@ -1,11 +1,17 @@
 """作品分级判定与过滤。
 
-pixiv 用两个字段表达分级：
+**只用 `x_restrict`，再拿 pixiv 自己的标签兜底。**
 
-- `x_restrict`：0 全年龄 / 1 R-18 / 2 R-18G
-- `sanity_level`：2 一般 / 4 R-18 / 6 R-18G
+这里记一笔踩过的坑：一开始还用了 `sanity_level`（文档说 2 一般 / 4 R-18 / 6 R-18G），
+结果实测 60 条样本里 **33 条判错**——App API 返回的 `sanity_level` 是噪音：
+正常作品也会给出 0 / 2 / 4 / 6，而真正的 R-18 作品 `x_restrict` 一定是 1。
+换成"只看 `x_restrict`"后与标签真相 **0 条不一致**。
 
-两个字段偶尔不同步（例如被举报后 sanity_level 先变），所以取更严格的一方。
+所以判定规则是：
+
+- `x_restrict` 0 全年龄 / 1 R-18 / 2 R-18G —— 主依据
+- 标签里出现 `R-18` / `R-18G` —— 兜底（pixiv 自己的标注，很可靠）
+- `sanity_level` —— **不参与判定**，只在数据模型里留档
 """
 
 from __future__ import annotations
@@ -47,9 +53,10 @@ def classify(illust: Illust) -> Rating:
     Returns:
         `safe` / `r18` / `r18g`。
     """
-    if illust.x_restrict >= 2 or illust.sanity_level >= 6:
+    tags = {tag.strip().upper() for tag in illust.tags}
+    if illust.x_restrict >= 2 or "R-18G" in tags:
         return "r18g"
-    if illust.x_restrict >= 1 or illust.sanity_level >= 4:
+    if illust.x_restrict >= 1 or "R-18" in tags:
         return "r18"
     return "safe"
 

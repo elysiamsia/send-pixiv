@@ -15,7 +15,7 @@ from src.app.plugin_system.api.send_api import send_image, send_text
 from src.app.plugin_system.base import BaseService
 
 from ..core.links import extract_refs
-from ..core.models import Illust
+from ..core.models import Illust, ImagePage
 from ..core.rating import filter_by_mode
 
 if TYPE_CHECKING:
@@ -194,11 +194,8 @@ class PixivService(BaseService):
             pages = illust.pages[: budget - outcome.sent]
             sent_here = 0
             for page in pages:
-                url = page.pick(cfg.download.image_quality)
-                if not url:
-                    continue
                 try:
-                    path = await self._fetch(illust, page.index, url)
+                    path = await self._fetch(illust, page, cfg.download.image_quality)
                 except Exception as exc:  # noqa: BLE001 - 单张失败不应中断整批
                     logger.warning(f"[send-pixiv] 下载失败 illust={illust.id} page={page.index}: {exc}")
                     outcome.skipped.append(f"{illust.id} 第 {page.index + 1} 张下载失败")
@@ -217,42 +214,58 @@ class PixivService(BaseService):
             await self._send_caption(outcome.works, stream_id=stream_id)
         return outcome
 
-    async def _fetch(self, illust: Illust, page: int, url: str) -> Path:
-        """取一张图：命中缓存直接复用，否则下载。
+    async def _fetch(self, illust: Illust, page: ImagePage, quality: str) -> Path:
+        """取一张图：命中缓存直接复用，否则按档位回退链下载。
+
+        为什么要回退链：master1200 并非对所有作品都存在（老作品、特殊格式会 404），
+        而 `original` 动辄十几 MB。所以按 `master1200 → large → original` 依次试，
+        谁能用就用谁。
 
         Args:
             illust: 所属作品。
-            page: 页码。
-            url: 图片地址。
+            page: 页码对象。
+            quality: 首选档位。
 
         Returns:
             本地文件路径。
 
         Raises:
-            ValueError: 图片超过配置的体积上限。
+            ValueError: 所有档位都不可用，或图片超过体积上限。
         """
         cache = self._plugin.cache
         client = self._plugin.client
-        assert cache is not None and client is not None
+        cfg = self._plugin.cfg
+        assert cache is not None and client is not None and cfg is not None
 
-        cached = cache.find(illust.id, page)
+        cached = cache.find(illust.id, page.index, quality)
         if cached is not None:
             cache.touch(cached)
             return cached
 
-        suffix = Path(url.split("?")[0]).suffix or ".jpg"
-        target = cache.path_for(illust.id, page, suffix)
-        path = await client.download_image(url, target)
+        limit_mb = float(cfg.download.max_image_mb or 0)
+        last_error: Exception | None = None
 
-        limit_mb = float(getattr(self._plugin.cfg.download, "max_image_mb", 0) or 0)
-        if limit_mb > 0 and path.stat().st_size > limit_mb * 1024 * 1024:
-            size_mb = path.stat().st_size / 1024 / 1024
+        for url in page.candidates(quality):
+            suffix = ImagePage.suffix_for(url)
+            target = cache.path_for(illust.id, page.index, suffix, quality)
             try:
-                path.unlink()
-            except OSError:
-                pass
-            raise ValueError(f"图片体积 {size_mb:.1f}MB 超过上限 {limit_mb:.1f}MB")
-        return path
+                path = await client.download_image(url, target)
+            except Exception as exc:  # noqa: BLE001 - 换下一个档位再试
+                last_error = exc
+                logger.debug(f"[send-pixiv] 档位不可用 {url[:90]}: {exc}")
+                continue
+
+            if limit_mb > 0 and path.stat().st_size > limit_mb * 1024 * 1024:
+                size_mb = path.stat().st_size / 1024 / 1024
+                try:
+                    path.unlink()
+                except OSError:
+                    pass
+                last_error = ValueError(f"图片体积 {size_mb:.1f}MB 超过上限 {limit_mb:.1f}MB")
+                continue
+            return path
+
+        raise last_error or ValueError("没有可用的图片地址")
 
     async def _push(
         self,

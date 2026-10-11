@@ -9,9 +9,13 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Literal
 
-__all__ = ["ImagePage", "Illust", "ImageQuality"]
+__all__ = ["ImagePage", "Illust", "ImageQuality", "master1200_url"]
 
-ImageQuality = Literal["large", "original"]
+ImageQuality = Literal["master1200", "large", "original"]
+
+#: master1200 档位的真实后缀。**永远是 jpg**，哪怕原图是 png——
+#: 实测 `_master1200.png` 一律 404，`_master1200.jpg` 才是真的。
+MASTER_SUFFIX = ".jpg"
 
 
 @dataclass(slots=True)
@@ -35,18 +39,63 @@ class ImagePage:
     width: int = 0
     height: int = 0
 
-    def pick(self, quality: str = "large") -> str:
-        """按质量档位取地址。
+    def pick(self, quality: str = "master1200") -> str:
+        """按质量档位取首选地址。
 
         Args:
-            quality: `large` 或 `original`。
+            quality: `master1200`（默认）/ `large` / `original`。
 
         Returns:
-            该档位的地址；`original` 缺失时回退到 `large`。
+            该档位的地址；该档位不适用时回退到别的档。
         """
-        if quality == "original":
-            return self.original_url or self.url
-        return self.url or self.original_url
+        candidates = self.candidates(quality)
+        return candidates[0] if candidates else ""
+
+    def candidates(self, quality: str = "master1200") -> list[str]:
+        """给出该档位的下载回退链（首选在前）。
+
+        master1200 并非对所有作品都存在（老作品、特殊格式会 404），
+        所以调用方需要一个回退顺序，而不是只试一次。
+
+        Args:
+            quality: `master1200` / `large` / `original`。
+
+        Returns:
+            去重后的地址列表。
+        """
+        master = master1200_url(self.original_url)
+        order = {
+            "master1200": [master, self.url, self.original_url],
+            "large": [self.url, master, self.original_url],
+            "original": [self.original_url, master, self.url],
+        }.get((quality or "").strip().lower(), [master, self.url, self.original_url])
+
+        seen: set[str] = set()
+        result: list[str] = []
+        for url in order:
+            if url and url not in seen:
+                seen.add(url)
+                result.append(url)
+        return result
+
+    @staticmethod
+    def suffix_for(url: str) -> str:
+        """从图片地址推断真实文件后缀。
+
+        App API 给的 `large` 地址是 webp 缩略图（路径里带 `_webp/`），
+        文件名却仍然是 `.jpg`——照抄会写出"扩展名撒谎"的文件。
+
+        Args:
+            url: 图片地址。
+
+        Returns:
+            形如 `.jpg` / `.webp` 的后缀。
+        """
+        path = url.split("?")[0]
+        if "_webp/" in path or path.lower().endswith(".webp"):
+            return ".webp"
+        suffix = path[path.rfind(".") :].lower() if "." in path else ""
+        return suffix if suffix in (".jpg", ".jpeg", ".png", ".gif", ".webp") else ".jpg"
 
 
 @dataclass(slots=True)
@@ -132,6 +181,27 @@ class Illust:
             pages=_extract_pages(data),
             is_ai=_to_int(data.get("illust_ai_type")) == 2,
         )
+
+
+def master1200_url(original_url: str) -> str:
+    """从原图地址推导 master1200（约 1200px 的 JPEG）地址。
+
+    聊天场景里这是最合适的档位：`large` 只有 600x1200 的 webp 缩略图（十几 KB），
+    `original` 动辄好几 MB。master1200 一般几百 KB，画质够看。
+
+    Args:
+        original_url: `img-original` 的原图地址。
+
+    Returns:
+        推导出的 master1200 地址；无法推导时返回空串。
+    """
+    if not original_url or "/img-original/" not in original_url:
+        return ""
+    url = original_url.replace("/img-original/", "/img-master/")
+    base, dot, _extension = url.rpartition(".")
+    if not dot:
+        return ""
+    return f"{base}_master1200{MASTER_SUFFIX}"
 
 
 def _to_int(value: Any) -> int:

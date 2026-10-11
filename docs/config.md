@@ -44,7 +44,7 @@
 | --- | --- | --- | --- |
 | `cache_dir` | str | `"./data/send-pixiv/cache"` | 图片缓存目录，按 `<作品ID>/<页码>.<后缀>` 组织 |
 | `max_cache_files` | int | `500` | 缓存文件数上限，超出按最旧淘汰，0＝不限 |
-| `image_quality` | str | `"large"` | `large` 长边约 1200px（推荐）/ `original` 原图 |
+| `image_quality` | str | `"master1200"` | `master1200` 约 1200px 的 JPEG，几百 KB（推荐）/ `large` 600x1200 的 webp 缩略图，只有十几 KB / `original` 原图，动辄好几 MB。前一档不存在时自动往后退 |
 | `max_images_per_request` | int | `2` | 单次请求最多发几张，1-9 |
 | `max_image_mb` | float | `8.0` | 单张体积上限（MB），超限跳过，0＝不限 |
 
@@ -81,7 +81,7 @@ refresh_token = "xxxxx-xxxxx"
 proxy = "http://127.0.0.1:7890"
 
 [download]
-image_quality = "large"
+image_quality = "master1200"
 max_images_per_request = 3
 
 [search]
@@ -102,3 +102,5 @@ auto_parse = true
 | 搜不到图但没报错 | `default_rating = "safe"` 把结果都过滤了，或该标签确实没有内容 |
 | 贴了链接没反应 | `links.auto_parse` 关了 / 该会话被黑名单挡住 / 在去重窗口内 |
 | 生成了 `config.toml` 但插件没生效 | 忘了重启 bot |
+| 改了 `image_quality` 但发出来还是旧档位 | 缓存按档位分区；若仍不对，清掉 `cache_dir` 重来 |
+| 图发不出去 / 被平台吞 | 图太大，把 `max_image_mb` 调小，或改用 `large` 档 |
