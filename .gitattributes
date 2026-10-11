@@ -1,0 +1,8 @@
+# 统一按 LF 存储，避免 Windows 上提交出一堆 CRLF 噪音
+* text=auto eol=lf
+
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.mfp binary

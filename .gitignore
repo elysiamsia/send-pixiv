@@ -1,0 +1,33 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.venv/
+venv/
+env/
+.python-version
+
+# 测试与类型检查缓存
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# 构建产物
+dist/
+build/
+*.egg-info/
+*.mfp
+
+# 运行时数据（插件在 bot 侧生成）
+data/
+token.json
+*.log
+
+# 编辑器
+.idea/
+.vscode/
+*.swp
+.DS_Store
