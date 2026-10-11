@@ -207,3 +207,57 @@ safe ← 其余
 - **凭据轮换**：`refresh_token` 确实会轮换，落盘逻辑按预期工作。
 - **失败隔离**：说明文字发送失败时只记一条 debug 日志，图片照发——实测中意外验证过一次。
 
+
+
+## 8. 加载期硬约束：Action 的 `associated_types`（2026-10-12 事故）
+
+第一次装进 bot 实测时炸了，报错长这样：
+
+```text
+AttributeError: 'NeoChatterPlugin' object has no attribute 'rating_mode_for'
+  File ".../plugins/send-pixiv/tools/pixiv_search_tool.py", line 54
+```
+
+**这个报错和根因隔了三层**。真正的根因在 bot 日志里：
+
+```text
+[02:41:14] 控制台 | ERROR | 插件 'send-pixiv' 加载失败:
+           Action 'send_pixiv_illust' 的 associated_types 必须是非空 list
+```
+
+### 事故链条
+
+1. `send_pixiv_illust` 没有声明 `associated_types`（默认空列表）。
+2. `plugin_manager._register_components` 在注册 Action 前会调用
+   `component_cls.validate_associated_types()`，**这个调用在 try 块之外**——
+   抛出的异常直接冒泡出去，**整个插件的组件注册流程中断**。
+3. 后果是**连锁的**：Action 没注册、排在它后面的 EventHandler 也没注册，
+   插件实例也没进 `_loaded_plugins`。
+   （bot 自己的思考日志里都写了"那个动作不在我的工具列表里"——它是对的。）
+4. 框架实例化 LLM 组件时按"组件签名 → 归属插件"解析，
+   而 `BaseChatter._resolve_component_plugin` 在**解析不到时会兜底成当前 chatter 的插件**。
+   于是 Tool 里的 `self.plugin` 变成了 `NeoChatterPlugin`，
+   调用 `plugin.rating_mode_for(...)` 就报出了那个莫名其妙的 AttributeError。
+
+### 两条修复
+
+**① 补上 `associated_types = ["image"]`。**
+取值没有固定词表（校验器只要求非空字符串列表），惯例是
+`["image"]` / `["text"]` / `["emoji"]` / `["file", "media"]`。
+运行时它还会被 `chat_context.check_types()` 用来过滤：
+当前聊天流不支持的类型会把 Action 剔除，所以别乱写。
+
+**② 组件不再直接信 `self.plugin`。**
+统一走 `core/runtime.py` 的 `resolve_own_plugin()`：先按插件名从注册表取，
+取不到再退回注入值，**两者都不是本插件就返回 None 并给出可读报错**。
+这样下次再有加载失败，看到的是一句人话，而不是隔了三层的 AttributeError。
+
+### 教训
+
+- **静态校验器要覆盖框架的加载期校验。** 这次 `scripts/check_manifest.py`
+  放过了它，现在补了"Action / Agent 必须有非空 associated_types"这条规则。
+- **排查插件问题先翻日志。** 报错位置（Tool 第 54 行）和根因（Action 少个字段）
+  隔了十万八千里，只有 `logs/` 里那句"插件加载失败"才是真线索。
+- 判断插件到底加载没有，看两处：`_loaded_plugins` 里有没有它、
+  `logs/` 里有没有 `加载失败`。
+

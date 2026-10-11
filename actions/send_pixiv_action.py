@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING, Annotated
 from src.app.plugin_system.api.log_api import get_logger
 from src.app.plugin_system.base import BaseAction
 
+from ..core.runtime import resolve_own_plugin
 from ..services.pixiv_service import PixivService
 
 if TYPE_CHECKING:
@@ -38,6 +39,12 @@ class SendPixivIllustAction(BaseAction):
     )
     primary_action: bool = False
 
+    #: 框架要求 Action 必须声明非空的关联类型，否则**整个插件加载失败**
+    #: （plugin_manager._register_components 会直接抛异常中断注册）。
+    #: 运行时还会用 chat_context.check_types() 过滤：当前聊天流不支持的类型
+    #: 会把 Action 剔除。图片是 QQ 群聊的标配，取 "image"。
+    associated_types: list[str] = ["image"]
+
     async def execute(
         self,
         url: Annotated[str, "pixiv 链接：作品页 https://www.pixiv.net/artworks/123 或作者主页 /users/123"] = "",
@@ -56,7 +63,9 @@ class SendPixivIllustAction(BaseAction):
         Returns:
             `(是否成功受理, 说明文本)`。
         """
-        plugin: "SendPixivPlugin" = self.plugin  # type: ignore[assignment]
+        plugin = resolve_own_plugin(self)
+        if plugin is None:
+            return False, "send-pixiv 插件未正确加载，请查看 bot 日志里的插件加载错误"
         cfg = plugin.cfg
         if cfg is None:
             return False, "插件配置未加载，请检查 config/plugins/send-pixiv/config.toml"

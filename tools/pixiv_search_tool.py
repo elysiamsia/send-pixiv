@@ -11,7 +11,8 @@ from typing import TYPE_CHECKING, Annotated
 from src.app.plugin_system.api.log_api import get_logger
 from src.app.plugin_system.base import BaseTool
 
-from ..core.rating import classify
+from ..core.rating import classify, filter_by_mode
+from ..core.runtime import resolve_own_plugin
 from ..services.pixiv_service import PixivService
 
 if TYPE_CHECKING:
@@ -46,7 +47,9 @@ class PixivSearchTool(BaseTool):
         Returns:
             `(是否成功, 结果文本)`。
         """
-        plugin: "SendPixivPlugin" = self.plugin  # type: ignore[assignment]
+        plugin = resolve_own_plugin(self)
+        if plugin is None:
+            return False, "send-pixiv 插件未正确加载，请查看 bot 日志里的插件加载错误"
         if not keyword or not keyword.strip():
             return False, "请提供搜索关键词"
 
@@ -61,8 +64,6 @@ class PixivSearchTool(BaseTool):
         except Exception as exc:  # noqa: BLE001 - 统一转成模型可读的失败信息
             logger.warning(f"[send-pixiv] 搜索失败 keyword={keyword!r}: {exc}")
             return False, f"pixiv 搜索失败：{exc}"
-
-        from ..core.rating import filter_by_mode
 
         allowed = filter_by_mode(illusts, mode)[:limit]
         if not allowed:

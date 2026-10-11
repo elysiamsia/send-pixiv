@@ -47,6 +47,12 @@ BASE_TO_TYPE = {
 
 SKIP_DIRS = {"tests", "scripts", "docs", "dist", "__pycache__", ".git", ".github", ".venv"}
 
+#: 这些组件类型必须声明**非空**的 associated_types，否则插件加载会直接失败
+#: （plugin_manager._register_components 会抛异常中断整个注册流程）。
+#: 实测踩过：Action 漏了它，整个插件没加载成功，报错却长成
+#: "NeoChatterPlugin object has no attribute ..."，完全看不出根因。
+REQUIRES_ASSOCIATED_TYPES = {"action", "agent"}
+
 
 def iter_sources() -> list[Path]:
     """列出需要扫描的 Python 文件。
@@ -99,14 +105,51 @@ def _targets_name(node: ast.stmt, attr: str) -> str | None:
     return _literal_str(value)
 
 
-def scan() -> tuple[str | None, list[dict[str, str]]]:
+def _list_literal(node: ast.AST | None) -> list[str] | None:
+    """把 @["a", "b"]@ 这样的字面量列表取出来。
+
+    Args:
+        node: 赋值右侧的节点。
+
+    Returns:
+        字符串列表；不是字面量列表时返回 @None@。
+    """
+    if not isinstance(node, ast.List):
+        return None
+    values: list[str] = []
+    for element in node.elts:
+        found = _literal_str(element)
+        if found is None:
+            return None
+        values.append(found)
+    return values
+
+
+def _assigned_value(node: ast.stmt, attr: str) -> ast.AST | None:
+    """取出给指定属性赋的值节点。
+
+    Args:
+        node: 语句节点。
+        attr: 目标属性名。
+
+    Returns:
+        右侧节点；无关语句返回 @None@。
+    """
+    if isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
+        return node.value if node.target.id == attr else None
+    if isinstance(node, ast.Assign) and len(node.targets) == 1 and isinstance(node.targets[0], ast.Name):
+        return node.value if node.targets[0].id == attr else None
+    return None
+
+
+def scan() -> tuple[str | None, list[dict[str, Any]]]:
     """扫描代码，收集插件名与所有组件声明。
 
     Returns:
-        @(plugin_name, components)@，components 每项含 class / type / name / file。
+        @(plugin_name, components)@，components 每项含 class / type / name / file / associated_types。
     """
     plugin_name: str | None = None
-    components: list[dict[str, str]] = []
+    components: list[dict[str, Any]] = []
 
     for path in iter_sources():
         try:
@@ -134,10 +177,19 @@ def scan() -> tuple[str | None, list[dict[str, str]]]:
                 continue
 
             name = None
+            associated: list[str] | None = None
             for statement in node.body:
                 name = name or _targets_name(statement, "name")
+                if associated is None:
+                    associated = _list_literal(_assigned_value(statement, "associated_types"))
             components.append(
-                {"class": node.name, "type": kind, "name": name or "", "file": rel}
+                {
+                    "class": node.name,
+                    "type": kind,
+                    "name": name or "",
+                    "file": rel,
+                    "associated_types": associated,
+                }
             )
 
     return plugin_name, components
@@ -222,6 +274,17 @@ def main() -> int:
         warnings.append(
             f"代码里有组件 {component_type}:{component_name} 没写进 manifest.include"
         )
+
+    # --- Action / Agent 必须有非空的 associated_types ---
+    for item in components:
+        if item["type"] not in REQUIRES_ASSOCIATED_TYPES:
+            continue
+        declared_types = item.get("associated_types")
+        if not declared_types:
+            errors.append(
+                f"{item['type']} '{item['name']}'（{item['class']}）缺少非空的 associated_types —— "
+                "框架会在注册组件时直接抛异常，导致整个插件加载失败"
+            )
 
     plugin_components = [item for item in components if item["type"] != "config"]
     print(f"插件名: {manifest.get('name')}  版本: {version}")

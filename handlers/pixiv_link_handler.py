@@ -15,6 +15,7 @@ from src.core.models.message import Message
 from src.kernel.event import EventDecision
 
 from ..core.links import extract_refs
+from ..core.runtime import resolve_own_plugin
 from ..services.pixiv_service import PixivService
 
 if TYPE_CHECKING:
@@ -60,7 +61,10 @@ class PixivLinkWatcher(BaseEventHandler):
         Args:
             params: 事件参数。
         """
-        plugin: "SendPixivPlugin" = self.plugin  # type: ignore[assignment]
+        plugin = resolve_own_plugin(self)
+        if plugin is None:
+            logger.warning("[send-pixiv] 拿不到插件实例，跳过链接解析（检查插件是否加载失败）")
+            return
         cfg = plugin.cfg
         if cfg is None or not cfg.links.auto_parse:
             return
