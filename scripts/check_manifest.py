@@ -105,6 +105,42 @@ def _targets_name(node: ast.stmt, attr: str) -> str | None:
     return _literal_str(value)
 
 
+_LOGGER_LEVELS = {"debug", "info", "warning", "error", "critical", "exception"}
+
+
+def check_logger_calls(tree: ast.AST, rel: str) -> list[str]:
+    """检查 `logger.xxx()` 的调用形态。
+
+    框架的 Logger 是 `info(message, **kwargs)`——**只接受一个位置参数**，
+    不像标准 logging 那样支持 printf 风格。写成
+    `logger.info("a=%s b=%s", x, y)` 会在运行期抛
+    `TypeError: Logger.info() takes 2 positional arguments but N were given`，
+    而且这种代码通常写在 `on_plugin_loaded` 里、只在加载时跑一次，很容易漏掉。
+
+    Args:
+        tree: 已解析的语法树。
+        rel: 文件相对路径，用于报错信息。
+
+    Returns:
+        问题描述列表。
+    """
+    problems: list[str] = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        func = node.func
+        if not isinstance(func, ast.Attribute) or func.attr not in _LOGGER_LEVELS:
+            continue
+        if not isinstance(func.value, ast.Name) or func.value.id != "logger":
+            continue
+        if len(node.args) > 1:
+            problems.append(
+                f"{rel}:{node.lineno} logger.{func.attr}() 传了 {len(node.args)} 个位置参数 —— "
+                "框架的 Logger 只接受一个 message，请先拼成 f-string"
+            )
+    return problems
+
+
 def _list_literal(node: ast.AST | None) -> list[str] | None:
     """把 @["a", "b"]@ 这样的字面量列表取出来。
 
@@ -142,21 +178,26 @@ def _assigned_value(node: ast.stmt, attr: str) -> ast.AST | None:
     return None
 
 
-def scan() -> tuple[str | None, list[dict[str, Any]]]:
-    """扫描代码，收集插件名与所有组件声明。
+def scan() -> tuple[str | None, list[dict[str, Any]], list[str]]:
+    """扫描代码，收集插件名、组件声明，以及 logger 调用问题。
 
     Returns:
-        @(plugin_name, components)@，components 每项含 class / type / name / file / associated_types。
+        @(plugin_name, components, logger_problems)@，
+        components 每项含 class / type / name / file / associated_types。
     """
     plugin_name: str | None = None
     components: list[dict[str, Any]] = []
+    logger_problems: list[str] = []
 
     for path in iter_sources():
+        rel = path.relative_to(ROOT).as_posix()
         try:
             tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
         except (OSError, SyntaxError) as exc:
-            print(f"[错误] 无法解析 {path.relative_to(ROOT)}: {exc}")
+            print(f"[错误] 无法解析 {rel}: {exc}")
             continue
+
+        logger_problems.extend(check_logger_calls(tree, rel))
 
         for node in ast.walk(tree):
             if not isinstance(node, ast.ClassDef):
@@ -192,7 +233,7 @@ def scan() -> tuple[str | None, list[dict[str, Any]]]:
                 }
             )
 
-    return plugin_name, components
+    return plugin_name, components, logger_problems
 
 
 
@@ -231,7 +272,10 @@ def main() -> int:
     if version and len(version.split(".")) < 3:
         warnings.append(f"version 不是 x.y.z 形式: {version}")
 
-    plugin_name, components = scan()
+    plugin_name, components, logger_problems = scan()
+
+    # --- logger 调用形态（框架的 Logger 只吃一个参数）---
+    errors.extend(logger_problems)
 
     # --- 名字一致性 ---
     if plugin_name and manifest.get("name") != plugin_name:

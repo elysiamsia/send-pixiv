@@ -177,6 +177,25 @@ class SendPixivPlugin(BasePlugin):
         """
         return self.policy.rating_mode_for(stream_id or "", platform or "")
 
+    def _has_credential(self, cfg: SendPixivConfig) -> bool:
+        """判断是否具备可用凭据。
+
+        配置里没填 `refresh_token` 不代表没有——登录脚本会把 token 写进
+        `token_path`，运行期以那份为准。之前只看配置，导致明明能用却报
+        "尚未配置凭据"。
+
+        Args:
+            cfg: 插件配置。
+
+        Returns:
+            有凭据返回 `True`。
+        """
+        if cfg.pixiv.refresh_token or cfg.pixiv.access_token:
+            return True
+        if self._client is not None and self._client.has_credential:
+            return True
+        return bool(TokenStore(resolve_path(cfg.pixiv.token_path)).refresh_token())
+
     def mark_sent(self, stream_id: str, illust_id: int) -> None:
         """记录"这个作品已经在本会话发过"。
 
@@ -217,17 +236,21 @@ class SendPixivPlugin(BasePlugin):
             return
 
         self._ensure_runtime()
-        if not (cfg.pixiv.refresh_token or cfg.pixiv.access_token):
+
+        if not self._has_credential(cfg):
             logger.warning(
-                "[send-pixiv] 尚未配置 pixiv 凭据（pixiv.refresh_token），发图功能不可用"
+                "[send-pixiv] 尚未配置 pixiv 凭据：请在配置里填 refresh_token，"
+                "或先跑 python scripts/pixiv_login.py 完成一次浏览器授权"
             )
+
+        # 注意：框架的 Logger.info(message, **kwargs) 只接受一个位置参数，
+        # 不能像标准 logging 那样写 printf 风格（会报
+        # "Logger.info() takes 2 positional arguments but N were given"）。
         logger.info(
-            "[send-pixiv] 已加载：分级=%s 默认张数=%s 质量=%s 自动解析链接=%s 代理=%s",
-            cfg.plugin.default_rating,
-            cfg.search.default_count,
-            cfg.download.image_quality,
-            cfg.links.auto_parse,
-            cfg.pixiv.proxy or "直连",
+            f"[send-pixiv] 已加载：分级={cfg.plugin.default_rating} "
+            f"默认张数={cfg.search.default_count} 质量={cfg.download.image_quality} "
+            f"自动解析链接={cfg.links.auto_parse} 图片直连={cfg.download.direct_image} "
+            f"代理={cfg.pixiv.proxy or '直连'}"
         )
 
     async def on_plugin_unloaded(self) -> None:

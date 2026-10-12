@@ -83,6 +83,39 @@ python scripts/pixiv_login.py --proxy http://127.0.0.1:7890
 
 完整配置项见 [docs/config.md](docs/config.md)。
 
+### 大陆网络怎么配（重要）
+
+pixiv 在大陆是「DNS 投毒 + SNI 阻断」两道锁，**但不同域名的处境不一样**：
+
+| 域名 | 用途 | 能不能直连 |
+| --- | --- | --- |
+| `app-api.pixiv.net` | 搜索 / 作品详情 | ❌ **必须走代理** |
+| `oauth.secure.pixiv.net` | 刷新令牌 | ❌ **必须走代理** |
+| `i.pximg.net` | 图片下载 | ✅ **可以直连** |
+
+原因是 GFW 按**域名清单**拦 TLS 的 SNI：那两个 API 域名在清单里，
+换 IP、改大小写、加尾点、TCP 分片**实测全部无效**；
+而图片域名不在清单里，连它的真实 IP 且**不发 SNI** 就能正常下到图。
+
+所以推荐的配法是——**代理照开，图片走直连**：
+
+```toml
+[pixiv]
+proxy = "http://127.0.0.1:7890"   # API 必须靠它
+
+[download]
+direct_image = true                # 图片不走代理，省流量也更快
+```
+
+**`direct_image` 替代不了代理**，它只是让图片绕开代理。先跑一次自检看当前环境：
+
+```bash
+python scripts/check_network.py --proxy http://127.0.0.1:7890
+```
+
+它会分别探测「API 直连 / API 走代理 / 图片直连」三条路，并告诉你配置该怎么填。
+完整的封锁机制分析与实测矩阵见 [docs/design.md](docs/design.md) 第 9 节。
+
 ## 用法
 
 **贴链接就发图**：消息里出现 `https://www.pixiv.net/artworks/12345678` 就会自动发送，
