@@ -132,15 +132,25 @@ python scripts/check_network.py --proxy http://127.0.0.1:7890
 > 用户：pixiv 上有什么好看的风景图
 > bot：（调用 `pixiv_search`）返回候选清单 → 用户挑一个 → bot 再发
 
+**直接下指令**（`#r18 关键词` / `#pixiv 关键词`）：
+
+> 用户：#r18 猫
+> bot：（绕开 LLM，插件直接搜）→ 发图
+
+指令是**用户主动触发**的，不经过模型判断，所以不会被"我不方便查找这类内容"
+之类的回答挡掉。R-18 仍然受分级策略约束：会话不在 `plugin.r18_streams` 里
+（且 `default_rating` 也不是 `r18`/`all`）时会明确拒绝并说明原因。
+
 ## 工作原理
 
 ```text
-聊天消息 ──► PixivLinkWatcher (EventHandler)  ─┐
+聊天消息 ──► PixivLinkWatcher  (EventHandler)  ─┐
                                                ├─► PixivService.resolve()  pixiv App API
-LLM ──► send_pixiv_illust (Action)  ──────────┤      ├─ 链接 → /v1/illust/detail
+聊天消息 ──► PixivCommandWatcher (EventHandler) ┤      ├─ 链接 → /v1/illust/detail
                                                │      ├─ 关键词 → /v1/search/illust
-LLM ──► pixiv_search (Tool，只查不发)  ────────┘      └─ 榜单 → /v1/illust/ranking
-                                                            │
+LLM ──► send_pixiv_illust (Action)  ──────────┤      └─ 榜单 → /v1/illust/ranking
+                                               │
+LLM ──► pixiv_search (Tool，只查不发)  ────────┘              │
                                        分级过滤 + 体积/张数限制 │
                                                             ▼
                                              ImageCache（落盘去重）──► send_api.send_image()

@@ -49,6 +49,47 @@ class LoggerCallCheckTest(unittest.TestCase):
         self.assertEqual(self._check('logger.bind("a", "b")'), [])
 
 
+class ConfigSectionCheckTest(unittest.TestCase):
+    """配置节必须"类 + 字段"两件套。
+
+    真实踩坑：只写了 `@config_section("trigger")` 的类，忘了声明
+    `trigger: TriggerSection = Field(...)`，结果该节不进 TOML、
+    `cfg.trigger` 也不存在，而且**一点报错都没有**。
+    """
+
+    def _check(self, source: str) -> list[str]:
+        return check_manifest.check_config_sections(ast.parse(source), "config.py")
+
+    def test_section_without_field_is_reported(self) -> None:
+        source = (
+            "class Cfg(BaseConfig):\n"
+            "    @config_section('trigger')\n"
+            "    class TriggerSection(SectionBase):\n"
+            "        enabled: bool = True\n"
+        )
+        problems = self._check(source)
+        self.assertEqual(len(problems), 1)
+        self.assertIn("TriggerSection", problems[0])
+        self.assertIn("trigger: TriggerSection = Field(default_factory=TriggerSection)", problems[0])
+
+    def test_section_with_field_is_fine(self) -> None:
+        source = (
+            "class Cfg(BaseConfig):\n"
+            "    @config_section('trigger')\n"
+            "    class TriggerSection(SectionBase):\n"
+            "        enabled: bool = True\n"
+            "\n"
+            "    trigger: TriggerSection = Field(default_factory=TriggerSection)\n"
+        )
+        self.assertEqual(self._check(source), [])
+
+    def test_field_name_derivation(self) -> None:
+        self.assertEqual(check_manifest._section_field_name("TriggerSection"), "trigger")
+        self.assertEqual(check_manifest._section_field_name("DownloadSection"), "download")
+        self.assertEqual(check_manifest._section_field_name("MyLongNameSection"), "my_long_name")
+        self.assertEqual(check_manifest._section_field_name("Plain"), "plain")
+
+
 class AssociatedTypesCheckTest(unittest.TestCase):
     """`scan` 对 associated_types 的采集。"""
 

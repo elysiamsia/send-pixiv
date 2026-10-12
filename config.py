@@ -146,6 +146,28 @@ class SendPixivConfig(BaseConfig):
             description="直连使用的图片站 IP 列表，留空使用内置的十个地址",
         )
 
+    @config_section("trigger")
+    class TriggerSection(SectionBase):
+        """聊天指令：发 `#r18 关键词` 就直接搜图。"""
+
+        enabled: bool = Field(
+            default=True,
+            description="是否响应聊天里的指令（例如 #r18 猫）",
+        )
+        r18_prefixes: list[str] = Field(
+            default_factory=lambda: ["#r18"],
+            description="R-18 搜索指令的前缀，可配多个（例如 #r18 / #R18 / 搞颜色）",
+        )
+        normal_prefixes: list[str] = Field(
+            default_factory=lambda: ["#pixiv"],
+            description="普通搜索指令的前缀（按会话默认分级），留空表示不要这条",
+        )
+        debounce_seconds: float = Field(
+            default=30.0,
+            ge=0,
+            description="同一条指令的防抖秒数，避免刷屏时重复触发",
+        )
+
     @config_section("search")
     class SearchSection(SectionBase):
         """搜索与筛选。"""
@@ -197,8 +219,11 @@ class SendPixivConfig(BaseConfig):
             description="单条消息里最多处理几个 pixiv 链接",
         )
 
+    # 注意：光用 @config_section 标记类是不够的，**必须再声明一个同名字段**，
+    # 框架才会把它当成配置节（否则该节既不进 TOML，实例上也没有这个属性）。
     plugin: PluginSection = Field(default_factory=PluginSection)
     pixiv: PixivSection = Field(default_factory=PixivSection)
     download: DownloadSection = Field(default_factory=DownloadSection)
+    trigger: TriggerSection = Field(default_factory=TriggerSection)
     search: SearchSection = Field(default_factory=SearchSection)
     links: LinksSection = Field(default_factory=LinksSection)

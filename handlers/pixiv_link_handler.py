@@ -126,16 +126,21 @@ class PixivLinkWatcher(BaseEventHandler):
         if cfg is None:
             return
         service = PixivService(plugin)
+        mode = plugin.rating_mode_for(stream_id, platform)
         for ref in refs:
             try:
-                illusts = await service.resolve(url=ref.raw, count=cfg.download.max_images_per_request)
+                illusts = await service.resolve(
+                    url=ref.raw,
+                    count=cfg.download.max_images_per_request,
+                    rating_mode=mode,
+                )
                 if not illusts:
                     continue
                 outcome = await service.send(
                     illusts,
                     stream_id=stream_id,
                     count=cfg.download.max_images_per_request,
-                    rating_mode=plugin.rating_mode_for(stream_id, platform),
+                    rating_mode=mode,
                 )
                 if outcome.ok:
                     plugin.policy.commit(stream_id)

@@ -83,6 +83,9 @@ class SendPixivIllustAction(BaseAction):
         want = int(count or 0) or int(cfg.search.default_count)
         want = max(1, min(want, cfg.download.max_images_per_request))
 
+        # 分级要在检索前算好：R-18 会话得放开服务端过滤，否则搜不到
+        mode = plugin.rating_mode_for(stream_id, platform)
+
         service = PixivService(plugin)
         try:
             illusts = await service.resolve(
@@ -90,6 +93,7 @@ class SendPixivIllustAction(BaseAction):
                 keyword=(keyword or "").strip(),
                 ranking=(ranking or "").strip(),
                 count=max(want * 3, 6),
+                rating_mode=mode,
             )
         except Exception as exc:  # noqa: BLE001 - 失败信息要能回到模型
             logger.warning(f"[send-pixiv] 解析失败 url={url!r} keyword={keyword!r}: {exc}")
@@ -98,7 +102,6 @@ class SendPixivIllustAction(BaseAction):
         if not illusts:
             return False, "没找到符合条件的作品（可能被分级或 AI 过滤挡掉了）"
 
-        mode = plugin.rating_mode_for(stream_id, platform)
         reply_to = getattr(self.chat_stream, "message", None)
         reply_to_id = getattr(reply_to, "message_id", "") or None
 

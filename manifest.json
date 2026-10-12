@@ -2,7 +2,7 @@
   "name": "send-pixiv",
   "display_name": "Pixiv 发图",
   "version": "0.1.0",
-  "description": "Pixiv 发图插件：聊天里丢链接、或让 bot 自己找图，自动下载插画并发送到聊天流；内置分级过滤与群白名单。",
+  "description": "Pixiv 发图插件：聊天里丢链接、发 #r18 关键词、或让 bot 自己找图，自动下载插画并发送到聊天流；内置分级过滤与群白名单。",
   "author": "elysiamsia",
   "license": "GPL-3.0",
   "homepage": "https://github.com/elysiamsia/send-pixiv",
@@ -55,6 +55,12 @@
     {
       "component_type": "event_handler",
       "component_name": "pixiv_link_watcher",
+      "dependencies": [],
+      "enabled": true
+    },
+    {
+      "component_type": "event_handler",
+      "component_name": "pixiv_command_watcher",
       "dependencies": [],
       "enabled": true
     }

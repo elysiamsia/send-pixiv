@@ -74,6 +74,7 @@ class PixivService(BaseService):
         keyword: str = "",
         ranking: str = "",
         count: int = 4,
+        rating_mode: str = "",
     ) -> list[Illust]:
         """把用户的输入（链接 / 关键词 / 榜单）解析成候选作品列表。
 
@@ -82,6 +83,9 @@ class PixivService(BaseService):
             keyword: 搜索关键词（按标签匹配）。
             ranking: 排行榜模式；给了就取排行榜。
             count: 最多返回多少个作品。
+            rating_mode: 这次检索按哪个分级取；留空表示按会话默认。
+                注意服务端 `filter=for_ios` 实测**不真的过滤 R-18**，
+                所以它只影响"要不要放开请求"，真正的过滤在 `send()` 里做。
 
         Returns:
             候选作品列表，已按插件配置做过基础清洗。
@@ -94,7 +98,10 @@ class PixivService(BaseService):
         if cfg is None or client is None:
             raise ValueError("插件尚未完成初始化，请检查配置")
 
-        want_r18 = self._plugin.rating_mode_for("") != "safe"
+        # 之前这里写的是 rating_mode_for("")，等于永远只问默认分级，
+        # 会话级的 r18_streams 配了也不生效。改成用调用方传进来的。
+        mode = (rating_mode or "").strip().lower() or self._plugin.rating_mode_for("")
+        want_r18 = mode != "safe"
         limit = max(1, count)
 
         if url:

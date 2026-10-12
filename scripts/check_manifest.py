@@ -141,6 +141,63 @@ def check_logger_calls(tree: ast.AST, rel: str) -> list[str]:
     return problems
 
 
+def check_config_sections(tree: ast.AST, rel: str) -> list[str]:
+    """检查每个 `@config_section` 类都有对应的字段声明。
+
+    框架的规矩是"两件套"：先用装饰器标记节类，**再声明一个同名字段**
+    （`trigger: TriggerSection = Field(default_factory=TriggerSection)`）。
+    只做前一半的话，这个节既不会出现在 TOML 里，实例上也没有对应属性——
+    而且**完全没有报错**，只有运行到 `cfg.xxx` 时才炸。
+
+    Args:
+        tree: 已解析的语法树。
+        rel: 文件相对路径，用于报错信息。
+
+    Returns:
+        问题描述列表。
+    """
+    problems: list[str] = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.ClassDef):
+            continue
+
+        sections: list[str] = []
+        fields: set[str] = set()
+        for statement in node.body:
+            if isinstance(statement, ast.ClassDef):
+                for decorator in statement.decorator_list:
+                    target = decorator.func if isinstance(decorator, ast.Call) else decorator
+                    if isinstance(target, ast.Name) and target.id == "config_section":
+                        sections.append(statement.name)
+            elif isinstance(statement, ast.AnnAssign) and isinstance(statement.target, ast.Name):
+                fields.add(statement.target.id)
+
+        for section in sections:
+            expected = _section_field_name(section)
+            if expected not in fields:
+                problems.append(
+                    f"{rel}:{node.lineno} 配置节 {section} 没有对应的字段声明 —— "
+                    f"请补上 {expected}: {section} = Field(default_factory={section})，"
+                    "否则该节不进 TOML、实例上也没有这个属性"
+                )
+    return problems
+
+
+def _section_field_name(class_name: str) -> str:
+    """由节类名推出字段名（`TriggerSection` → `trigger`）。
+
+    Args:
+        class_name: 节类名。
+
+    Returns:
+        字段名。
+    """
+    name = class_name
+    if name.endswith("Section"):
+        name = name[: -len("Section")]
+    return "".join(("_" + ch.lower()) if ch.isupper() and i else ch.lower() for i, ch in enumerate(name))
+
+
 def _list_literal(node: ast.AST | None) -> list[str] | None:
     """把 @["a", "b"]@ 这样的字面量列表取出来。
 
@@ -198,6 +255,7 @@ def scan() -> tuple[str | None, list[dict[str, Any]], list[str]]:
             continue
 
         logger_problems.extend(check_logger_calls(tree, rel))
+        logger_problems.extend(check_config_sections(tree, rel))
 
         for node in ast.walk(tree):
             if not isinstance(node, ast.ClassDef):
