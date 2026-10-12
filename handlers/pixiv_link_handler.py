@@ -80,6 +80,8 @@ class PixivLinkWatcher(BaseEventHandler):
             return
 
         stream_id = message.stream_id or ""
+        # 平台要一起带上：配置里可以直接写群号，靠它换算成 stream_id
+        platform = message.platform or ""
         if not stream_id:
             return
 
@@ -95,13 +97,13 @@ class PixivLinkWatcher(BaseEventHandler):
         if not fresh:
             return
 
-        verdict = plugin.policy.check(stream_id)
+        verdict = plugin.policy.check(stream_id, platform)
         if not verdict.allowed:
             logger.debug(f"[send-pixiv] 链接命中但被策略拒绝: {verdict.reason}")
             return
 
         plugin.spawn(
-            self._deliver(plugin, fresh, stream_id),
+            self._deliver(plugin, fresh, stream_id, platform),
             name=f"send-pixiv-link-{stream_id[:8]}",
         )
 
@@ -110,6 +112,7 @@ class PixivLinkWatcher(BaseEventHandler):
         plugin: "SendPixivPlugin",
         refs: list,
         stream_id: str,
+        platform: str = "",
     ) -> None:
         """后台下载并发送链接指向的作品。
 
@@ -117,6 +120,7 @@ class PixivLinkWatcher(BaseEventHandler):
             plugin: 插件实例。
             refs: 命中的 pixiv 引用。
             stream_id: 目标聊天流。
+            platform: 平台标识，用于按群号解析分级名单。
         """
         cfg = plugin.cfg
         if cfg is None:
@@ -131,7 +135,7 @@ class PixivLinkWatcher(BaseEventHandler):
                     illusts,
                     stream_id=stream_id,
                     count=cfg.download.max_images_per_request,
-                    rating_mode=plugin.rating_mode_for(stream_id),
+                    rating_mode=plugin.rating_mode_for(stream_id, platform),
                 )
                 if outcome.ok:
                     plugin.policy.commit(stream_id)

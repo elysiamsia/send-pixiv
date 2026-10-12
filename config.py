@@ -30,22 +30,19 @@ class SendPixivConfig(BaseConfig):
         )
         allowed_streams: list[str] = Field(
             default_factory=list,
-            description=(
-                "允许使用本插件的聊天流 ID 白名单，留空表示所有会话都允许。"
-                "stream_id 是框架对会话做的 SHA-256 哈希（不是群号），开 debug 日志发一次图就能看到"
-            ),
+            description="允许使用本插件的会话白名单，**直接填群号或 QQ 号**（也认 stream_id 哈希），留空表示所有会话都允许",
         )
         blocked_streams: list[str] = Field(
             default_factory=list,
-            description="禁止使用的聊天流 ID 黑名单，优先级高于白名单",
+            description="禁止使用的会话黑名单（填群号或 QQ 号），优先级高于白名单",
         )
         r18_streams: list[str] = Field(
             default_factory=list,
-            description="允许出现 R-18 的聊天流 ID（仅建议私聊或小群）",
+            description="允许出现 R-18 的会话（填群号或 QQ 号，仅建议私聊或小群）",
         )
         r18g_streams: list[str] = Field(
             default_factory=list,
-            description="允许出现 R-18G 的聊天流 ID（请谨慎配置）",
+            description="允许出现 R-18G 的会话（填群号或 QQ 号，请谨慎配置）",
         )
         cooldown_seconds: float = Field(
             default=30.0,

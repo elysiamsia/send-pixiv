@@ -1,19 +1,59 @@
 """访问策略：白名单、冷却、每日配额与分级授权。
 
-这些判断都基于 **聊天流 ID**（`stream_id`，框架里是 SHA-256 哈希）。
-哈希值人眼不可读，所以先在群里发一次、再从日志里把 ID 抄进配置即可，
-配置项的描述里写了取法。
+这些判断基于 **聊天流 ID**（`stream_id`，框架里是 SHA-256 哈希）。
+
+但配置里**不要求你写那串哈希**——直接写群号 / QQ 号就行。框架的算法是确定的::
+
+    群聊: sha256(f"{platform}_{group_id}")
+    私聊: sha256(f"{platform}_{user_id}_private")
+
+所以插件在判断时把名单里的数字换算成两种可能的哈希再比对，两种写法都认。
 """
 
 from __future__ import annotations
 
+import hashlib
 import time
 from dataclasses import dataclass
 from typing import Iterable, Literal
 
-__all__ = ["Policy", "Verdict", "Debouncer"]
+__all__ = ["Policy", "Verdict", "Debouncer", "stream_id_candidates", "looks_like_stream_id"]
 
 RatingMode = Literal["safe", "r18", "all"]
+
+#: stream_id 的形态：SHA-256 的十六进制串。
+_STREAM_ID_LENGTH = 64
+_HEX_DIGITS = set("0123456789abcdef")
+
+
+def stream_id_candidates(platform: str, number: str) -> tuple[str, str]:
+    """由「平台 + 群号/QQ号」推出它可能的 stream_id。
+
+    Args:
+        platform: 平台标识，例如 `qq`。
+        number: 群号或 QQ 号。
+
+    Returns:
+        `(群聊候选, 私聊候选)`。
+    """
+    prefix = f"{platform}_{number}"
+    return (
+        hashlib.sha256(prefix.encode()).hexdigest(),
+        hashlib.sha256(f"{prefix}_private".encode()).hexdigest(),
+    )
+
+
+def looks_like_stream_id(value: str) -> bool:
+    """判断一个配置值是不是 stream_id 哈希。
+
+    Args:
+        value: 配置里的值。
+
+    Returns:
+        是 64 位十六进制串返回 `True`。
+    """
+    text = (value or "").strip().lower()
+    return len(text) == _STREAM_ID_LENGTH and all(ch in _HEX_DIGITS for ch in text)
 
 
 @dataclass(frozen=True, slots=True)
@@ -81,11 +121,40 @@ class Policy:
     # 准入
     # ------------------------------------------------------------------
 
-    def check(self, stream_id: str) -> Verdict:
+    def _hit(self, stream_id: str, configured: set[str], platform: str = "") -> bool:
+        """判断聊天流是否命中某个名单。
+
+        名单里既可以写 stream_id 哈希，也可以**直接写群号 / QQ 号**——
+        后者会把两种可能的哈希算出来比对。
+
+        Args:
+            stream_id: 聊天流 ID。
+            configured: 名单。
+            platform: 平台标识，用于把群号换算成 stream_id。
+
+        Returns:
+            命中返回 `True`。
+        """
+        if not configured:
+            return False
+        if stream_id in configured:
+            return True
+        if not platform:
+            return False
+        for entry in configured:
+            text = (entry or "").strip()
+            if not text or looks_like_stream_id(text):
+                continue
+            if stream_id in stream_id_candidates(platform, text):
+                return True
+        return False
+
+    def check(self, stream_id: str, platform: str = "") -> Verdict:
         """判断这个聊天流当前能否发起一次请求。
 
         Args:
             stream_id: 聊天流 ID。
+            platform: 平台标识；给上之后名单里可以直接写群号。
 
         Returns:
             判断结果；被拒时 `reason` 可直接答复用户。
@@ -93,10 +162,10 @@ class Policy:
         if not self.enabled:
             return Verdict(False, "Pixiv 插件已被配置禁用")
 
-        if stream_id in self.blocked_streams:
+        if self._hit(stream_id, self.blocked_streams, platform):
             return Verdict(False, "当前会话被禁止使用 pixiv 功能")
 
-        if self.allowed_streams and stream_id not in self.allowed_streams:
+        if self.allowed_streams and not self._hit(stream_id, self.allowed_streams, platform):
             return Verdict(False, "当前会话不在 pixiv 允许列表内")
 
         wait = self.cooldown_left(stream_id)
@@ -157,18 +226,19 @@ class Policy:
             return True
         return self._quota_used.get(stream_id, 0) < self.daily_quota
 
-    def rating_mode_for(self, stream_id: str) -> RatingMode:
+    def rating_mode_for(self, stream_id: str, platform: str = "") -> RatingMode:
         """该聊天流允许的最高分级。
 
         Args:
             stream_id: 聊天流 ID。
+            platform: 平台标识；给上之后名单里可以直接写群号。
 
         Returns:
             `safe` / `r18` / `all`。
         """
-        if stream_id in self.r18g_streams:
+        if self._hit(stream_id, self.r18g_streams, platform):
             return "all"
-        if stream_id in self.r18_streams:
+        if self._hit(stream_id, self.r18_streams, platform):
             return "r18"
         mode = (self.default_rating or "safe").strip().lower()
         return mode if mode in ("safe", "r18", "all") else "safe"  # type: ignore[return-value]

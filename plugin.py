@@ -165,16 +165,17 @@ class SendPixivPlugin(BasePlugin):
     # 给组件用的小工具
     # ------------------------------------------------------------------
 
-    def rating_mode_for(self, stream_id: str) -> str:
+    def rating_mode_for(self, stream_id: str, platform: str = "") -> str:
         """某个聊天流允许的最高分级。
 
         Args:
             stream_id: 聊天流 ID。
+            platform: 平台标识；给上之后配置里可以直接写群号。
 
         Returns:
             `safe` / `r18` / `all`。
         """
-        return self.policy.rating_mode_for(stream_id or "")
+        return self.policy.rating_mode_for(stream_id or "", platform or "")
 
     def mark_sent(self, stream_id: str, illust_id: int) -> None:
         """记录"这个作品已经在本会话发过"。

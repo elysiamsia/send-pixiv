@@ -54,7 +54,12 @@ class PixivSearchTool(BaseTool):
             return False, "请提供搜索关键词"
 
         service = PixivService(plugin)
-        mode = plugin.rating_mode_for(getattr(self, "stream_id", "") or "")
+        # 触发消息上有平台信息，配置里写群号时靠它换算成 stream_id
+        trigger = getattr(self, "trigger_message", None)
+        mode = plugin.rating_mode_for(
+            getattr(self, "stream_id", "") or "",
+            getattr(trigger, "platform", "") or "",
+        )
         limit = max(1, min(int(count or 5), 10))
         # 多取一些再按分级过滤，避免全年龄模式下结果被过滤空。
         fetch = limit * 3 if mode == "safe" else limit

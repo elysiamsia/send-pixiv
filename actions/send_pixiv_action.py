@@ -71,10 +71,12 @@ class SendPixivIllustAction(BaseAction):
             return False, "插件配置未加载，请检查 config/plugins/send-pixiv/config.toml"
 
         stream_id = getattr(self.chat_stream, "stream_id", "") or ""
+        # 平台要一起带上：配置里可以直接写群号，靠它换算成 stream_id
+        platform = getattr(self.chat_stream, "platform", "") or ""
         if not stream_id:
             return False, "拿不到当前聊天流，无法发送"
 
-        verdict = plugin.policy.check(stream_id)
+        verdict = plugin.policy.check(stream_id, platform)
         if not verdict.allowed:
             return False, verdict.reason
 
@@ -96,7 +98,7 @@ class SendPixivIllustAction(BaseAction):
         if not illusts:
             return False, "没找到符合条件的作品（可能被分级或 AI 过滤挡掉了）"
 
-        mode = plugin.rating_mode_for(stream_id)
+        mode = plugin.rating_mode_for(stream_id, platform)
         reply_to = getattr(self.chat_stream, "message", None)
         reply_to_id = getattr(reply_to, "message_id", "") or None
 

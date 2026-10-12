@@ -11,15 +11,36 @@
 | --- | --- | --- | --- |
 | `enabled` | bool | `true` | 插件总开关 |
 | `default_rating` | str | `"safe"` | 默认分级：`safe` 仅全年龄 / `r18` 允许 R-18 / `all` 不限。写错按 `safe` 处理 |
-| `allowed_streams` | list[str] | `[]` | 允许使用的会话白名单，留空＝不限制 |
-| `blocked_streams` | list[str] | `[]` | 禁用会话黑名单，优先级高于白名单 |
-| `r18_streams` | list[str] | `[]` | 这些会话按 `r18` 处理 |
-| `r18g_streams` | list[str] | `[]` | 这些会话按 `all` 处理（慎用） |
+| `allowed_streams` | list[str] | `[]` | 允许使用的会话白名单，**直接填群号或 QQ 号**，留空＝不限制 |
+| `blocked_streams` | list[str] | `[]` | 禁用会话黑名单（填群号或 QQ 号），优先级高于白名单 |
+| `r18_streams` | list[str] | `[]` | 这些会话按 `r18` 处理（填群号或 QQ 号） |
+| `r18g_streams` | list[str] | `[]` | 这些会话按 `all` 处理（填群号或 QQ 号，慎用） |
 | `cooldown_seconds` | float | `30.0` | 同一会话两次请求的冷却秒数，0＝不限 |
 | `daily_quota` | int | `0` | 同一会话每天最多成功次数，0＝不限 |
 
-> **stream_id 怎么拿？** 它是框架对会话做的 SHA-256 哈希（`ChatStream.generate_stream_id`），
-> 不是群号。开 debug 日志发一次图，就能在日志里看到实际值。
+### 名单里填什么？
+
+**直接填群号或 QQ 号就行**，例如：
+
+```toml
+[plugin]
+allowed_streams = ["123456789"]      # 只允许这个群
+blocked_streams = ["987654321"]      # 拉黑这个群
+r18_streams = ["你的QQ号"]            # 私聊允许 R-18
+```
+
+框架内部用的是 `stream_id`（SHA-256 哈希，人眼没法认），但它的算法是确定的：
+
+```text
+群聊: sha256(f"{platform}_{group_id}")
+私聊: sha256(f"{platform}_{user_id}_private")
+```
+
+插件在判断时会把名单里的数字按当前平台换算成哈希再比对，所以两种写法都认：
+写群号（推荐）或直接写那串 64 位哈希（老写法，仍然有效）。
+
+> 注意：写群号依赖**当前会话的平台信息**。正常收发消息时平台总是有的，
+> 所以照常写群号即可。
 
 ## [pixiv] 凭据与网络
 
