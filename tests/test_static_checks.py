@@ -49,6 +49,41 @@ class LoggerCallCheckTest(unittest.TestCase):
         self.assertEqual(self._check('logger.bind("a", "b")'), [])
 
 
+class RegisteredComponentsCheckTest(unittest.TestCase):
+    """组件类必须写进 `get_components()`。
+
+    真实踩坑：新增了 `PixivCommandWatcher`、文件也同步进 bot 了，但忘了往
+    `get_components()` 的返回列表里加。结果是日志里一切正常
+    （"开始注册插件 'send-pixiv' 的 5 个组件"），**组件却永远不生效**，
+    `#r18` 指令发出去没人接，用户看到的是"还是不行"。
+    """
+
+    def _registered(self, source: str) -> set[str] | None:
+        return check_manifest.registered_component_names(ast.parse(source))
+
+    def test_reads_returned_names(self) -> None:
+        source = (
+            "class P(BasePlugin):\n"
+            "    def get_components(self) -> list[type]:\n"
+            "        return [\n"
+            "            A,\n"
+            "            B,\n"
+            "        ]\n"
+        )
+        self.assertEqual(self._registered(source), {"A", "B"})
+
+    def test_missing_method(self) -> None:
+        self.assertIsNone(self._registered("class P(BasePlugin):\n    pass\n"))
+
+    def test_empty_list(self) -> None:
+        source = (
+            "class P(BasePlugin):\n"
+            "    def get_components(self):\n"
+            "        return []\n"
+        )
+        self.assertEqual(self._registered(source), set())
+
+
 class ConfigSectionCheckTest(unittest.TestCase):
     """配置节必须"类 + 字段"两件套。
 

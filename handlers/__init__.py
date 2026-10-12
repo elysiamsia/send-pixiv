@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from .pixiv_command_handler import PixivCommandWatcher
 from .pixiv_link_handler import PixivLinkWatcher
 
-__all__ = ["PixivLinkWatcher"]
+__all__ = ["PixivCommandWatcher", "PixivLinkWatcher"]

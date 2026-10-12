@@ -31,7 +31,7 @@ from .core.cache import ImageCache
 from .core.client import PixivClient
 from .core.policy import Debouncer, Policy
 from .core.token import TokenStore
-from .handlers import PixivLinkWatcher
+from .handlers import PixivCommandWatcher, PixivLinkWatcher
 from .services import PixivService
 from .tools import PixivSearchTool
 
@@ -85,6 +85,7 @@ class SendPixivPlugin(BasePlugin):
             PixivSearchTool,
             SendPixivIllustAction,
             PixivLinkWatcher,
+            PixivCommandWatcher,
         ]
 
     # ------------------------------------------------------------------

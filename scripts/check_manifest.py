@@ -141,6 +141,28 @@ def check_logger_calls(tree: ast.AST, rel: str) -> list[str]:
     return problems
 
 
+def registered_component_names(tree: ast.AST) -> set[str] | None:
+    """取出 `get_components()` 返回值里列出的组件类名。
+
+    这个方法才是注册的**真源**（`manifest.include` 只是文档）。写完一个组件类、
+    文件也同步过去了，只要忘了往这个列表里加，它**永远不会被注册**——
+    而且日志里只会显示"注册了 N 个组件"，不报任何错。
+
+    Args:
+        tree: 已解析的语法树。
+
+    Returns:
+        类名集合；没有 `get_components` 时返回 `None`。
+    """
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.FunctionDef) or node.name != "get_components":
+            continue
+        for sub in ast.walk(node):
+            if isinstance(sub, ast.Return) and isinstance(sub.value, ast.List):
+                return {e.id for e in sub.value.elts if isinstance(e, ast.Name)}
+    return None
+
+
 def check_config_sections(tree: ast.AST, rel: str) -> list[str]:
     """检查每个 `@config_section` 类都有对应的字段声明。
 
@@ -235,16 +257,18 @@ def _assigned_value(node: ast.stmt, attr: str) -> ast.AST | None:
     return None
 
 
-def scan() -> tuple[str | None, list[dict[str, Any]], list[str]]:
-    """扫描代码，收集插件名、组件声明，以及 logger 调用问题。
+def scan() -> tuple[str | None, list[dict[str, Any]], list[str], set[str] | None]:
+    """扫描代码，收集插件名、组件声明、logger 问题与已注册的组件名。
 
     Returns:
-        @(plugin_name, components, logger_problems)@，
-        components 每项含 class / type / name / file / associated_types。
+        @(plugin_name, components, logger_problems, registered)@，
+        components 每项含 class / type / name / file / associated_types；
+        registered 是 `get_components()` 里列出的类名（没有则为 `None`）。
     """
     plugin_name: str | None = None
     components: list[dict[str, Any]] = []
     logger_problems: list[str] = []
+    registered: set[str] | None = None
 
     for path in iter_sources():
         rel = path.relative_to(ROOT).as_posix()
@@ -256,6 +280,9 @@ def scan() -> tuple[str | None, list[dict[str, Any]], list[str]]:
 
         logger_problems.extend(check_logger_calls(tree, rel))
         logger_problems.extend(check_config_sections(tree, rel))
+        found_registered = registered_component_names(tree)
+        if found_registered is not None:
+            registered = found_registered
 
         for node in ast.walk(tree):
             if not isinstance(node, ast.ClassDef):
@@ -291,7 +318,7 @@ def scan() -> tuple[str | None, list[dict[str, Any]], list[str]]:
                 }
             )
 
-    return plugin_name, components, logger_problems
+    return plugin_name, components, logger_problems, registered
 
 
 
@@ -330,10 +357,22 @@ def main() -> int:
     if version and len(version.split(".")) < 3:
         warnings.append(f"version 不是 x.y.z 形式: {version}")
 
-    plugin_name, components, logger_problems = scan()
+    plugin_name, components, logger_problems, registered = scan()
 
     # --- logger 调用形态（框架的 Logger 只吃一个参数）---
     errors.extend(logger_problems)
+
+    # --- 组件类必须写进 get_components()，否则永远不会被注册 ---
+    # config 组件由框架单独注册（不在 get_components() 里），跳过
+    if registered is not None:
+        for component in components:
+            if component["type"] == "config":
+                continue
+            if component["class"] not in registered:
+                errors.append(
+                    f"{component['file']} 组件 {component['class']} 没有写进 get_components() —— "
+                    "光有类文件不会被注册（manifest.include 只是文档，不是注册真源）"
+                )
 
     # --- 名字一致性 ---
     if plugin_name and manifest.get("name") != plugin_name:
