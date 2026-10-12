@@ -136,6 +136,18 @@ class SendPixivConfig(BaseConfig):
             ge=0,
             description="单张图片的体积上限（MB），0 表示不限制；超限的图会被跳过",
         )
+        direct_image: bool = Field(
+            default=False,
+            description=(
+                "图片是否走直连：连 i.pximg.net 的真实 IP 且不发 SNI，绕开 SNI 封锁。"
+                "大陆网络下打开可以省代理流量、也更快；API 仍然需要代理"
+                "（app-api.pixiv.net 在封锁清单里，直连不了）。直连失败会自动退回常规路径"
+            ),
+        )
+        direct_image_ips: list[str] = Field(
+            default_factory=list,
+            description="直连使用的图片站 IP 列表，留空使用内置的十个地址",
+        )
 
     @config_section("search")
     class SearchSection(SectionBase):

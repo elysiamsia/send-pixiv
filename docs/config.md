@@ -47,6 +47,8 @@
 | `image_quality` | str | `"master1200"` | `master1200` 约 1200px 的 JPEG，几百 KB（推荐）/ `large` 600x1200 的 webp 缩略图，只有十几 KB / `original` 原图，动辄好几 MB。前一档不存在时自动往后退 |
 | `max_images_per_request` | int | `2` | 单次请求最多发几张，1-9 |
 | `max_image_mb` | float | `8.0` | 单张体积上限（MB），超限跳过，0＝不限 |
+| `direct_image` | bool | `false` | 图片是否走直连（连 `i.pximg.net` 的真实 IP 且**不发 SNI**，绕开 SNI 封锁）。大陆网络下打开可省代理流量、也更快；**API 仍然需要代理**。直连失败会自动退回常规路径 |
+| `direct_image_ips` | list[str] | `[]` | 直连使用的图片站 IP，留空用内置的十个地址（`210.140.139.129-138`） |
 
 ## [search] 搜索与筛选
 
@@ -104,3 +106,5 @@ auto_parse = true
 | 生成了 `config.toml` 但插件没生效 | 忘了重启 bot |
 | 改了 `image_quality` 但发出来还是旧档位 | 缓存按档位分区；若仍不对，清掉 `cache_dir` 重来 |
 | 图发不出去 / 被平台吞 | 图太大，把 `max_image_mb` 调小，或改用 `large` 档 |
+| 大陆网络下不开代理就搜不到图 | 正常：API 域名在 GFW 的 SNI 封锁清单里，**必须走代理**；`direct_image` 只让图片直连，救不了 API |
+| 开了 `direct_image` 反而更慢 | 直连失败会先试一次再退回，属正常开销；可把 `direct_image_ips` 换成更近的地址 |

@@ -261,3 +261,69 @@ AttributeError: 'NeoChatterPlugin' object has no attribute 'rating_mode_for'
 - 判断插件到底加载没有，看两处：`_loaded_plugins` 里有没有它、
   `logs/` 里有没有 `加载失败`。
 
+
+
+## 9. 无代理直连：GFW 到底在拦什么（2026-10-12 实测）
+
+起因是看到 PixEz（Flutter 第三方客户端）号称"国内直连"。把它的网络层挖开对照实测，
+结论比它源码里写的更细。
+
+### 9.1 PixEz 的两套方案
+
+`lib/network/pixez_network_settings.dart` 里有两个模式：
+
+```dart
+// compat：连写死的真实 IP + 不发 SNI + 不验证证书
+TlsSettings(verifyCertificates: false, sni: false)
+DnsSettings.dynamic(resolver: → {app-api: 210.140.139.155, i.pximg: 210.140.139.133})
+
+// ech：加密 ClientHello + Cloudflare IP，保留完整证书校验
+ClientSettings(enableEch: true, requireEch: true,
+  tlsSettings: TlsSettings(verifyCertificates: true, sni: true),
+  dnsSettings: DnsSettings.static(overrides: {app-api: ['104.18.10.118','104.18.11.118']}))
+```
+
+### 9.2 实测：哪些成立、哪些不成立
+
+用 IP × SNI 矩阵逐格打过：
+
+| IP | SNI=`app-api.pixiv.net` | 无害 SNI | 不发 SNI |
+| --- | --- | --- | --- |
+| `104.18.42.239` | ❌ RST | ❌ RST | ❌ RST |
+| `172.64.145.17` | ❌ RST | ✅ 200 | ❌ RST |
+| `104.18.10.118` | ❌ RST | ✅ 200 | ❌ RST |
+| `210.140.139.155` | ❌ RST | ✅ 421 | ✅ 403 |
+
+结论：
+
+1. **GFW 对 pixiv 是按域名清单拦 SNI 的**——同一个 IP 换成无害 SNI 就通，
+   换回 pixiv 的域名立刻 0.2 秒 RST。大小写变体、结尾加点、TCP 分片**统统无效**
+   （GFW 会重组）。
+2. **ECH 这条路对 pixiv 不成立**：查 `app-api.pixiv.net` / `www.pixiv.net` / 域名的
+   HTTPS 记录，**全是 NODATA**——pixiv 根本没发布 ECH 配置。没有 ECHConfigList，
+   ECH 无从谈起（curl 8.22 + OpenSSL 3.5.9 都支持也没用）。
+3. **域名前置不成立**：SNI 换成无害域名、Host 头写 pixiv，Cloudflare 直接
+   `403 Forbidden (cloudflare)`——它有 SNI/Host 一致性检查。
+4. **不发 SNI 对 API 也不成立**：Cloudflare 需要 SNI 才能路由；pixiv 自己的 nginx
+   （`210.140.139.155`）对无 SNI 请求回 403，`fanbox.cc` 的 SNI 配 pixiv 的 Host 回 421。
+5. **但图片站可以直连** ✅——`i.pximg.net` 不在封锁清单里，它那十个 IP
+   （`210.140.139.129-138`）**只要不发 SNI 就能正常握手**，服务器返回 `*.pximg.net` 证书。
+
+顺带纠正一个我自己的误判：`104.18.42.239` 不是投毒结果，它是 `app-api.pixiv.net`
+的真实 IP 之一（Cloudflare 自己解析出来也是它）；那个地址是**IP 级封锁**，与 SNI 无关。
+
+### 9.3 于是插件有了 `direct_image`
+
+既然图片能直连，就把它做成了配置项（`download.direct_image`，默认关）：
+
+- 下载图片时**连 IP + 不发 SNI + 带 Host 头**，走 `.no_sni` 里的上下文；
+- **证书链照常验证**（`CERT_REQUIRED`），另外在握手完成瞬间按证书的
+  `subjectAltName` 手工比对目标域名，不通过就抛错。比 PixEz 的
+  `verifyCertificates: false` 严——它为了能用干脆不验证，我们只放弃 SNI、不放弃校验。
+- 直连失败**自动退回常规路径**（该走代理走代理），所以开着它不会让下载更容易失败。
+
+实测（代理关闭状态下）：直连 782 KB JPEG / 4.2 秒成功；常规路径无代理必失败。
+
+**注意**：API（搜索、详情、刷新令牌）仍然必须走代理，这一点没有绕过。
+`direct_image` 省的是图片流量，不是让整个插件脱离代理。
+

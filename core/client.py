@@ -23,10 +23,12 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Final
+from urllib.parse import urlsplit
 
 import httpx
 
 from .models import Illust
+from .no_sni import make_no_sni_context
 from .token import TokenStore
 
 __all__ = [
@@ -46,6 +48,23 @@ __all__ = [
 CLIENT_ID: Final = "MOBrBDS8blbauoSck0ZfDbtuzpyT"
 CLIENT_SECRET: Final = "lsACyCD94FhDUtGTXi3QzcFE2uU1hqtDaKeqrdwj"
 CLIENT_HASH_SALT: Final = "28c1fdd170a5204386cb1313c7077b32"
+
+#: 图片站的直连 IP。GFW 对 pixiv 是按域名清单拦 SNI 的，
+#: `app-api.pixiv.net` / `oauth.secure.pixiv.net` 在清单里，**`i.pximg.net` 不在**。
+#: 所以「连 IP + 不发 SNI + 带 Host 头」就能直接下图，不必走代理。
+#: 实测（2026-10-12）：下面十个地址全部可用。
+DIRECT_IMAGE_IPS: Final = (
+    "210.140.139.129",
+    "210.140.139.130",
+    "210.140.139.131",
+    "210.140.139.132",
+    "210.140.139.133",
+    "210.140.139.134",
+    "210.140.139.135",
+    "210.140.139.136",
+    "210.140.139.137",
+    "210.140.139.138",
+)
 
 OAUTH_URL: Final = "https://oauth.secure.pixiv.net/auth/token"
 APP_API_BASE: Final = "https://app-api.pixiv.net"
@@ -106,6 +125,8 @@ class PixivClient:
         min_interval: float = 1.2,
         max_retries: int = 3,
         token_store: TokenStore | None = None,
+        direct_image: bool = False,
+        direct_image_ips: list[str] | None = None,
     ) -> None:
         """初始化客户端。
 
@@ -125,8 +146,12 @@ class PixivClient:
         self.min_interval = max(0.0, float(min_interval))
         self.max_retries = max(1, int(max_retries))
         self._token_store = token_store
+        self.direct_image = bool(direct_image)
+        self.direct_image_ips = [ip for ip in (direct_image_ips or []) if ip] or list(DIRECT_IMAGE_IPS)
 
         self._client: httpx.AsyncClient | None = None
+        self._image_client: httpx.AsyncClient | None = None
+        self._no_sni_contexts: dict[str, Any] = {}
         self._token_lock = asyncio.Lock()
         self._gate_lock = asyncio.Lock()
         self._last_call = 0.0
@@ -162,11 +187,35 @@ class PixivClient:
             self._client = httpx.AsyncClient(**kwargs)
         return self._client
 
+    def _image_http_client(self, host: str) -> httpx.AsyncClient:
+        """给直连图片用的 httpx 客户端（不发 SNI）。
+
+        Args:
+            host: 图片站主机名，用于校验证书。
+
+        Returns:
+            复用同一个连接的客户端。
+        """
+        if self._image_client is None:
+            context = self._no_sni_contexts.get(host)
+            if context is None:
+                context = make_no_sni_context(host)
+                self._no_sni_contexts[host] = context
+            self._image_client = httpx.AsyncClient(
+                timeout=httpx.Timeout(self.timeout),
+                follow_redirects=True,
+                headers={"User-Agent": self.user_agent},
+                verify=context,
+            )
+        return self._image_client
+
     async def close(self) -> None:
         """关闭底层连接池。"""
-        if self._client is not None:
-            await self._client.aclose()
-            self._client = None
+        for client in (self._client, self._image_client):
+            if client is not None:
+                await client.aclose()
+        self._client = None
+        self._image_client = None
 
     @property
     def has_credential(self) -> bool:
@@ -508,6 +557,9 @@ class PixivClient:
     async def download_image(self, url: str, dest: Path) -> Path:
         """下载单张图片到本地。
 
+        开了 `direct_image` 时先试直连（连 IP + 不发 SNI，见 :mod:`.no_sni`），
+        失败再退回常规路径（该走代理走代理）。
+
         Args:
             url: `i.pximg.net` 图片地址。
             dest: 目标文件路径，父目录会自动创建。
@@ -516,16 +568,63 @@ class PixivClient:
             写入完成的文件路径。
 
         Raises:
-            PixivError: 下载失败或内容为空。
+            PixivError: 两种方式都失败。
         """
         dest = Path(dest)
         dest.parent.mkdir(parents=True, exist_ok=True)
-        headers = {"Referer": IMAGE_REFERER}
-        last_error: Exception | None = None
 
+        last_error: Exception | None = None
+        for direct in self._download_modes(url):
+            try:
+                return await self._download_once(url, dest, direct=direct)
+            except Exception as exc:  # noqa: BLE001 - 换下一种方式再试
+                last_error = exc
+
+        raise last_error or PixivError("下载图片失败")
+
+    def _download_modes(self, url: str) -> list[bool]:
+        """给出这次下载要尝试的方式（直连在前）。
+
+        Args:
+            url: 图片地址。
+
+        Returns:
+            `[True, False]` 或 `[False]`。
+        """
+        if self.direct_image and "pximg.net" in url and self.direct_image_ips:
+            return [True, False]
+        return [False]
+
+    async def _download_once(self, url: str, dest: Path, *, direct: bool) -> Path:
+        """按指定方式下载一次。
+
+        Args:
+            url: 图片地址。
+            dest: 目标路径。
+            direct: 是否走直连（连 IP、不发 SNI）。
+
+        Returns:
+            写入完成的文件路径。
+        """
+        parsed = urlsplit(url)
+        host = (parsed.hostname or "").lower()
+        headers = {"Referer": IMAGE_REFERER}
+        target = url
+        client = self.client
+
+        if direct and host:
+            ip = self.direct_image_ips[0]
+            target = f"https://{ip}{parsed.path}"
+            if parsed.query:
+                target = f"{target}?{parsed.query}"
+            # 连的是 IP，路由得靠 Host 头，否则 nginx 会 421
+            headers["Host"] = host
+            client = self._image_http_client(host)
+
+        last_error: Exception | None = None
         for attempt in range(self.max_retries):
             try:
-                response = await self.client.get(url, headers=headers)
+                response = await client.get(target, headers=headers)
             except httpx.HTTPError as exc:
                 last_error = PixivNetworkError(f"下载图片失败: {exc}")
                 await self._backoff(attempt)

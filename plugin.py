@@ -147,6 +147,8 @@ class SendPixivPlugin(BasePlugin):
                 min_interval=cfg.pixiv.min_interval_seconds,
                 max_retries=cfg.pixiv.max_retries,
                 token_store=TokenStore(resolve_path(cfg.pixiv.token_path)),
+                direct_image=cfg.download.direct_image,
+                direct_image_ips=list(cfg.download.direct_image_ips),
             )
 
         if self._cache is None:
