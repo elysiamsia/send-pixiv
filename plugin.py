@@ -18,6 +18,7 @@ Service 在框架里**不是单例**，把状态放在 Service 实例里会随�
 
 from __future__ import annotations
 
+import time
 from pathlib import Path
 from typing import Any, Coroutine, TypeVar
 
@@ -66,6 +67,8 @@ class SendPixivPlugin(BasePlugin):
         self._cache: ImageCache | None = None
         self._policy: Policy | None = None
         self._debouncer = Debouncer()
+        #: `{聊天流: {作品ID: 发送时间}}`，供"同一个关键词换图"排序用。
+        self._sent: dict[str, dict[int, float]] = {}
 
     # ------------------------------------------------------------------
     # 组件声明
@@ -233,6 +236,30 @@ class SendPixivPlugin(BasePlugin):
         cfg = self.cfg
         ttl = float(cfg.links.debounce_seconds) if cfg is not None else 300.0
         self._debouncer.hit(stream_id, f"illust:{illust_id}", ttl=ttl)
+        # 另记一份带时间戳的，供"换图"排序用（防抖器只能回答"在不在窗口内"）
+        self._sent.setdefault(stream_id, {})[int(illust_id)] = time.time()
+
+    def recently_sent(self, stream_id: str, ttl: float = 3600.0) -> dict[int, float]:
+        """本会话最近发过的作品，返回 `{作品ID: 发送时间}`。
+
+        用于"同一个关键词每次换一批图"：调用方按"没发过的优先、
+        发过的按最早发送排前"重排候选即可。
+
+        Args:
+            stream_id: 聊天流 ID。
+            ttl: 超过这个时长的记录视为过期（可以再发），<= 0 表示全部视为过期。
+
+        Returns:
+            作品 ID 到发送时间戳的映射。
+        """
+        record = self._sent.get(stream_id)
+        if not record:
+            return {}
+        now = time.time()
+        expired = [key for key, stamp in record.items() if ttl <= 0 or now - stamp >= ttl]
+        for key in expired:
+            record.pop(key, None)
+        return dict(record)
 
     def spawn(self, coro: "Coroutine[Any, Any, _T]", *, name: str) -> None:
         """把耗时协程交给 TaskManager 的后台守护任务。

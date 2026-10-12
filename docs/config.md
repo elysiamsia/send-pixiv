@@ -109,6 +109,16 @@ r18_streams = ["你的QQ号"]            # 私聊允许 R-18
 | `ranking_mode` | str | `"day"` | `day` / `week` / `month` / `day_male` / `day_female` / `week_rookie` / `day_r18` 等 |
 | `exclude_ai` | bool | `false` | 过滤 AI 生成作品 |
 | `exclude_ugoira` | bool | `true` | 跳过动图（当前不会合成 GIF） |
+| `rotate` | bool | `true` | **换图**：同一个关键词每次尽量发没发过的，全发过之后按最早发送的轮一遍 |
+| `rotate_pool` | int | `30` | 每次从 API 取多少候选来挑；越大越不容易重复，代价是请求更慢 |
+| `rotate_window_seconds` | float | `3600.0` | 多久之内算「发过」；超过这个时长的作品可以再发一次 |
+
+> **为什么会需要换图**：pixiv 的搜索接口对同一个关键词每次返回的都是同一批结果
+> （排序固定），所以不处理的话「#r18 猫」发两次就是同样的图。
+> 插件取一批候选后按 **「没发过的优先、发过的按最早发送在后」** 重排，
+> 调用方照旧取前 N 个——头几次都发新的，一批发完之后自然轮换，不会卡住也不会重复。
+>
+> 关掉 `rotate` 就退回老行为（每次都是同一批）。
 
 ## [links] 链接自动解析
 

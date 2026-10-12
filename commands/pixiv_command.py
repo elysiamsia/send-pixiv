@@ -129,13 +129,23 @@ class _PixivCommandBase(BaseCommand):
         if cfg is None:
             return
 
+        want = max(1, cfg.download.max_images_per_request)
+        # 换图：多取一些候选，并把"最近发过的"排到后面——这样同一个关键词
+        # 每次发的都是没发过的，全发过之后自动从头轮一遍。
+        pool = max(want * 3, cfg.search.rotate_pool) if cfg.search.rotate else max(want * 3, 6)
+        avoid = (
+            plugin.recently_sent(stream_id, ttl=cfg.search.rotate_window_seconds)
+            if cfg.search.rotate
+            else None
+        )
+
         service = PixivService(plugin)
         try:
             illusts = await service.resolve(
                 keyword=keyword,
-                # 多取一些再按分级过滤，避免全年龄模式下被过滤空
-                count=max(cfg.download.max_images_per_request * 3, 6),
+                count=pool,
                 rating_mode=mode,
+                avoid=avoid,
             )
             if not illusts:
                 await self._reply(stream_id, f"没搜到「{keyword}」的图，换个词试试？")
@@ -144,7 +154,7 @@ class _PixivCommandBase(BaseCommand):
             outcome = await service.send(
                 illusts,
                 stream_id=stream_id,
-                count=cfg.download.max_images_per_request,
+                count=want,
                 rating_mode=mode,
             )
             if outcome.ok:

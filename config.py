@@ -171,6 +171,25 @@ class SendPixivConfig(BaseConfig):
     class SearchSection(SectionBase):
         """搜索与筛选。"""
 
+        rotate: bool = Field(
+            default=True,
+            description=(
+                "同一个关键词每次尽量换一批图：优先发没发过的，都发过了就按"
+                "「最早发过的」重新轮一遍。关掉的话每次都是同一批"
+            ),
+        )
+        rotate_pool: int = Field(
+            default=30,
+            ge=1,
+            le=100,
+            description="每次从 API 取多少候选来挑（越大越不容易重复，代价是请求更慢）",
+        )
+        rotate_window_seconds: float = Field(
+            default=3600.0,
+            ge=0,
+            description="多久之内算「发过」；超过这个时长的作品可以再发一次",
+        )
+
         default_count: int = Field(
             default=2,
             ge=1,

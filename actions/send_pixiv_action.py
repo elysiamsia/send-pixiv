@@ -86,14 +86,23 @@ class SendPixivIllustAction(BaseAction):
         # 分级要在检索前算好：R-18 会话得放开服务端过滤，否则搜不到
         mode = plugin.rating_mode_for(stream_id, platform)
 
+        # 换图：同一个关键词每次尽量给不同的图（优先没发过的）
+        pool = max(want * 3, cfg.search.rotate_pool) if cfg.search.rotate else max(want * 3, 6)
+        avoid = (
+            plugin.recently_sent(stream_id, ttl=cfg.search.rotate_window_seconds)
+            if cfg.search.rotate
+            else None
+        )
+
         service = PixivService(plugin)
         try:
             illusts = await service.resolve(
                 url=(url or "").strip(),
                 keyword=(keyword or "").strip(),
                 ranking=(ranking or "").strip(),
-                count=max(want * 3, 6),
+                count=pool,
                 rating_mode=mode,
+                avoid=avoid,
             )
         except Exception as exc:  # noqa: BLE001 - 失败信息要能回到模型
             logger.warning(f"[send-pixiv] 解析失败 url={url!r} keyword={keyword!r}: {exc}")

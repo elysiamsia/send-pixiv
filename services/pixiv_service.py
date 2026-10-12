@@ -75,6 +75,7 @@ class PixivService(BaseService):
         ranking: str = "",
         count: int = 4,
         rating_mode: str = "",
+        avoid: dict[int, float] | None = None,
     ) -> list[Illust]:
         """把用户的输入（链接 / 关键词 / 榜单）解析成候选作品列表。
 
@@ -86,6 +87,9 @@ class PixivService(BaseService):
             rating_mode: 这次检索按哪个分级取；留空表示按会话默认。
                 注意服务端 `filter=for_ios` 实测**不真的过滤 R-18**，
                 所以它只影响"要不要放开请求"，真正的过滤在 `send()` 里做。
+            avoid: `{作品ID: 上次发送时间}`，用于**换图**：给了就把候选重排成
+                "没发过的按原序在前、发过的按最早发送在后"。这样调用方照旧取
+                前 N 个，就能每次拿到不同的图，且全都发过之后自动从头轮一遍。
 
         Returns:
             候选作品列表，已按插件配置做过基础清洗。
@@ -136,9 +140,39 @@ class PixivService(BaseService):
                 search_target=cfg.search.search_target,
                 include_r18=want_r18,
             )
-            return self._clean(illusts)
+            return self._rotate(self._clean(illusts), avoid)
 
         raise ValueError("需要提供 pixiv 链接、搜索关键词或榜单")
+
+    @staticmethod
+    def _rotate(
+        illusts: list[Illust],
+        avoid: dict[int, float] | None,
+    ) -> list[Illust]:
+        """按"换图"需要重排候选。
+
+        同一个关键词，pixiv 每次返回的都是同一批，所以光靠检索拿不到新图。
+        这里把候选排成：**没发过的（保持 API 顺序）在前，发过的按发送时间
+        从早到晚在后**。调用方照旧取前 N 个，效果就是：
+
+        - 头几次每次都发新的；
+        - 一批都发完之后，最久没出现的先回来——自然轮换，不会卡住。
+
+        Args:
+            illusts: 候选作品。
+            avoid: `{作品ID: 上次发送时间}`；为空表示不重排。
+
+        Returns:
+            重排后的列表。
+        """
+        if not avoid:
+            return illusts
+        fresh = [item for item in illusts if item.id not in avoid]
+        stale = sorted(
+            (item for item in illusts if item.id in avoid),
+            key=lambda item: avoid[item.id],
+        )
+        return [*fresh, *stale]
 
     def _clean(self, illusts: list[Illust]) -> list[Illust]:
         """按配置过滤候选作品。
