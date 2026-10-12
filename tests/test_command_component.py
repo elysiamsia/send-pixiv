@@ -91,6 +91,27 @@ def run_command(cls: type, plugin: FakePlugin, keyword: str) -> tuple[bool, str]
     return asyncio.run(command.execute(keyword))
 
 
+def spy_on_deliver() -> list[tuple[str, str]]:
+    """把模块级的 `_deliver` 换成间谍，记录真正传进去的关键词与分级。
+
+    `_deliver` 是模块级函数（两条指令共用），所以用打补丁而不是子类覆盖。
+
+    Returns:
+        记录用的列表，元素为 `(关键词, 分级)`。
+    """
+    captured: list[tuple[str, str]] = []
+    original = command_module._deliver
+
+    async def spy(_plugin, _stream_id, keyword, mode):  # noqa: ANN001
+        """只记录，不真发。"""
+        captured.append((keyword, mode))
+
+    command_module._deliver = spy  # type: ignore[assignment]
+    # 用例结束后恢复，避免污染其他用例
+    unittest.addModuleCleanup(setattr, command_module, "_deliver", original)
+    return captured
+
+
 class R18CommandTest(unittest.TestCase):
     """`#r18` 的行为。"""
 
@@ -102,42 +123,22 @@ class R18CommandTest(unittest.TestCase):
 
     def test_whole_rest_is_the_keyword(self) -> None:
         "多词关键词要整段保留——框架默认路由只会传第一个词，所以重写了 execute。"
-
-        class SpyCommand(PixivR18Command):
-            """把 `_deliver` 换成间谍，看真正传进去的关键词。"""
-
-            captured: list[tuple[str, str]] = []
-
-            async def _deliver(self, plugin, stream_id, keyword, mode):  # type: ignore[override]
-                """只记录，不真发。"""
-                SpyCommand.captured.append((keyword, mode))
-
-        SpyCommand.captured = []
+        captured = spy_on_deliver()
         plugin = FakePlugin()
         plugin.keep_coroutines = True
-        ok, _ = run_command(SpyCommand, plugin, "猫 少女")
+        ok, _ = run_command(PixivR18Command, plugin, "猫 少女")
         self.assertTrue(ok)
         asyncio.run(plugin.coroutines[0])  # type: ignore[arg-type]
-        self.assertEqual(SpyCommand.captured, [("猫 少女", "r18")])
+        self.assertEqual(captured, [("猫 少女", "r18")])
 
     def test_keyword_is_passed_to_delivery(self) -> None:
         "单关键词也要原样传下去。"
-
-        class SpyCommand(PixivR18Command):
-            """记录关键词。"""
-
-            captured: list[tuple[str, str]] = []
-
-            async def _deliver(self, plugin, stream_id, keyword, mode):  # type: ignore[override]
-                """只记录。"""
-                SpyCommand.captured.append((keyword, mode))
-
-        SpyCommand.captured = []
+        captured = spy_on_deliver()
         plugin = FakePlugin()
         plugin.keep_coroutines = True
-        run_command(SpyCommand, plugin, "洛茜")
+        run_command(PixivR18Command, plugin, "洛茜")
         asyncio.run(plugin.coroutines[0])  # type: ignore[arg-type]
-        self.assertEqual(SpyCommand.captured, [("洛茜", "r18")])
+        self.assertEqual(captured, [("洛茜", "r18")])
 
     def test_empty_keyword_replies_usage(self) -> None:
         framework_stub.clear_sent()

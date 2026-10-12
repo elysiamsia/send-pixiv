@@ -6,7 +6,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Annotated
+from typing import Annotated
 
 from src.app.plugin_system.api.log_api import get_logger
 from src.app.plugin_system.base import BaseTool
@@ -14,9 +14,6 @@ from src.app.plugin_system.base import BaseTool
 from ..core.rating import classify, filter_by_mode
 from ..core.runtime import resolve_own_plugin
 from ..services.pixiv_service import PixivService
-
-if TYPE_CHECKING:
-    from ..plugin import SendPixivPlugin
 
 __all__ = ["PixivSearchTool"]
 

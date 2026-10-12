@@ -58,7 +58,7 @@ class ImageCacheTest(unittest.TestCase):
 
     def test_prune_keeps_newest(self) -> None:
         cache = ImageCache(self.tmp / "p", max_files=3)
-        import os, time
+        import os
 
         paths = []
         for i in range(6):

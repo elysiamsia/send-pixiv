@@ -7,8 +7,7 @@
   "license": "GPL-3.0",
   "homepage": "https://github.com/elysiamsia/send-pixiv",
   "categories": [
-    "tool",
-    "media"
+    "tool"
   ],
   "tags": [
     "pixiv",
@@ -71,6 +70,7 @@
       "enabled": true
     }
   ],
+  "min_core_version": "1.0.0",
   "entry_point": "plugin.py",
   "api_version": {
     "log_api": "1.0.0",

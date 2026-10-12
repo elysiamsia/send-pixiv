@@ -53,7 +53,7 @@ class SendPixivPlugin(BasePlugin):
 
     plugin_name: str = "send-pixiv"
 
-    configs: list[type] = [SendPixivConfig]
+    configs = [SendPixivConfig]
     dependent_components: list[str] = []
 
     def __init__(self, config: SendPixivConfig | None = None) -> None:
