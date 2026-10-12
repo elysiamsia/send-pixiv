@@ -1,0 +1,27 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "send-pixiv"
+version = "0.2.0"
+description = "Neo-MoFox 的 Pixiv 发图插件：链接、聊天指令或 LLM 工具都能发图，内置分级管控与群白名单。"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "GPL-3.0" }
+authors = [{ name = "elysiamsia" }]
+keywords = ["neomofox", "mofox", "plugin", "pixiv", "illust", "chatbot"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "License :: OSI Approved :: GNU General Public License v3 (GPLv3)",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Communications :: Chat",
+]
+#: 插件零第三方依赖：只用标准库 + bot 自带的 httpx。
+dependencies = []
+
+[project.urls]
+Homepage = "https://github.com/elysiamsia/send-pixiv"
+Repository = "https://github.com/elysiamsia/send-pixiv"
+Changelog = "https://github.com/elysiamsia/send-pixiv/blob/main/CHANGELOG.md"
