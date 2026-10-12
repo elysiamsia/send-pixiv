@@ -278,6 +278,38 @@ def scan() -> tuple[str | None, list[dict[str, Any]], list[str], set[str] | None
             print(f"[错误] 无法解析 {rel}: {exc}")
             continue
 
+        # 本文件里所有类的继承关系，用于解析**间接继承**
+        # （组件经常继承一个插件内部的公共基类，而不是直接继承 BaseXxx）
+        parents: dict[str, set[str]] = {}
+        for node in ast.walk(tree):
+            if isinstance(node, ast.ClassDef):
+                parents[node.name] = {
+                    base.id if isinstance(base, ast.Name) else getattr(base, "attr", "")
+                    for base in node.bases
+                }
+
+        def kind_of(name: str, _seen: set[str] | None = None) -> str | None:
+            """沿继承链找组件类型。
+
+            Args:
+                name: 类名。
+                _seen: 已访问集合，防止循环继承。
+
+            Returns:
+                组件类型；找不到返回 `None`。
+            """
+            seen = _seen if _seen is not None else set()
+            if name in seen:
+                return None
+            seen.add(name)
+            if name in BASE_TO_TYPE:
+                return BASE_TO_TYPE[name]
+            for parent in parents.get(name, ()):
+                found = kind_of(parent, seen)
+                if found:
+                    return found
+            return None
+
         logger_problems.extend(check_logger_calls(tree, rel))
         logger_problems.extend(check_config_sections(tree, rel))
         found_registered = registered_component_names(tree)
@@ -287,11 +319,14 @@ def scan() -> tuple[str | None, list[dict[str, Any]], list[str], set[str] | None
         for node in ast.walk(tree):
             if not isinstance(node, ast.ClassDef):
                 continue
+            # 下划线开头的是内部基类（例如 _PixivCommandBase），不算组件
+            if node.name.startswith("_"):
+                continue
             bases = {
                 base.id if isinstance(base, ast.Name) else getattr(base, "attr", "")
                 for base in node.bases
             }
-            kind = next((BASE_TO_TYPE[b] for b in bases if b in BASE_TO_TYPE), None)
+            kind = kind_of(node.name)
             rel = path.relative_to(ROOT).as_posix()
 
             if "BasePlugin" in bases or kind is None:

@@ -31,7 +31,8 @@ from .core.cache import ImageCache
 from .core.client import PixivClient
 from .core.policy import Debouncer, Policy
 from .core.token import TokenStore
-from .handlers import PixivCommandWatcher, PixivLinkWatcher
+from .commands import PixivR18Command, PixivSearchCommand
+from .handlers import PixivLinkWatcher
 from .services import PixivService
 from .tools import PixivSearchTool
 
@@ -85,7 +86,8 @@ class SendPixivPlugin(BasePlugin):
             PixivSearchTool,
             SendPixivIllustAction,
             PixivLinkWatcher,
-            PixivCommandWatcher,
+            PixivR18Command,
+            PixivSearchCommand,
         ]
 
     # ------------------------------------------------------------------
@@ -178,6 +180,27 @@ class SendPixivPlugin(BasePlugin):
         """
         return self.policy.rating_mode_for(stream_id or "", platform or "")
 
+    def _register_hash_prefix(self) -> None:
+        """把 `#` 追加进框架的命令前缀。
+
+        框架默认只认 `/`（`CommandManager._command_prefixes`），而本插件的
+        指令习惯写成 `#r18 猫`。这里**追加**而不是替换，避免踩掉别人配的前缀。
+
+        注册成 Command 的消息**不会进聊天流**，所以模型看不到它，
+        也就不会再冒出来回一句"这类内容我不查哦"——这正是要 Command 的原因。
+        """
+        try:
+            from src.app.plugin_system.api import command_api
+
+            manager = command_api._get_command_manager()
+            current = list(getattr(manager, "_command_prefixes", ["/"]))
+            if "#" in current:
+                return
+            command_api.set_prefixes([*current, "#"])
+            logger.info(f"[send-pixiv] 已把 '#' 追加为命令前缀：{[*current, '#']}")
+        except Exception as exc:  # noqa: BLE001 - 注册失败不该让插件加载不了
+            logger.warning(f"[send-pixiv] 注册 '#' 命令前缀失败，只能使用 /r18：{exc}")
+
     def _has_credential(self, cfg: SendPixivConfig) -> bool:
         """判断是否具备可用凭据。
 
@@ -237,6 +260,9 @@ class SendPixivPlugin(BasePlugin):
             return
 
         self._ensure_runtime()
+
+        if cfg.trigger.register_hash_prefix:
+            self._register_hash_prefix()
 
         if not self._has_credential(cfg):
             logger.warning(

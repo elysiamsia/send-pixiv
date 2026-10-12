@@ -148,24 +148,23 @@ class SendPixivConfig(BaseConfig):
 
     @config_section("trigger")
     class TriggerSection(SectionBase):
-        """聊天指令：发 `#r18 关键词` 就直接搜图。"""
+        """聊天指令：发 `#r18 关键词` 就直接搜图。
+
+        实现为框架原生的 **Command 组件**——命令消息执行完就**不会进聊天流**，
+        模型看不到它，也就不会再冒出来回一句"这类内容我不查哦"。
+        """
 
         enabled: bool = Field(
             default=True,
-            description="是否响应聊天里的指令（例如 #r18 猫）",
+            description="是否响应聊天里的指令（#r18 猫 / #pixiv 风景）",
         )
-        r18_prefixes: list[str] = Field(
-            default_factory=lambda: ["#r18"],
-            description="R-18 搜索指令的前缀，可配多个（例如 #r18 / #R18 / 搞颜色）",
-        )
-        normal_prefixes: list[str] = Field(
-            default_factory=lambda: ["#pixiv"],
-            description="普通搜索指令的前缀（按会话默认分级），留空表示不要这条",
-        )
-        debounce_seconds: float = Field(
-            default=30.0,
-            ge=0,
-            description="同一条指令的防抖秒数，避免刷屏时重复触发",
+        register_hash_prefix: bool = Field(
+            default=True,
+            description=(
+                "把 # 追加为框架的命令前缀，这样「#r18 猫」才生效。"
+                "关掉后只能用框架默认的「/r18 猫」。"
+                "插件是追加不是替换，不会踩掉别处配的前缀"
+            ),
         )
 
     @config_section("search")

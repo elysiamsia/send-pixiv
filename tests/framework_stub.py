@@ -236,6 +236,51 @@ def install() -> None:
     class BaseAction(_Component):
         """替身版 Action 基类。"""
 
+    class BaseCommand(_Component):
+        """替身版 Command 基类。
+
+        框架构造时会带上 `stream_id` / `message_id` / `message`，
+        命令实现里会用到，所以这里也要收。
+        """
+
+        command_prefix = "/"
+
+        def __init__(
+            self,
+            plugin: Any = None,
+            stream_id: str = "",
+            message_id: str = "",
+            message: Any = None,
+        ) -> None:
+            """初始化。
+
+            Args:
+                plugin: 所属插件。
+                stream_id: 聊天流 ID。
+                message_id: 触发消息 ID。
+                message: 触发消息。
+            """
+            super().__init__(plugin)
+            self.stream_id = stream_id
+            self.message_id = message_id
+            self._message = message
+
+    def cmd_route(*path: str):
+        """替身版路由装饰器，只把路径挂到函数上。
+
+        Args:
+            *path: 路由片段。
+
+        Returns:
+            装饰器。
+        """
+
+        def decorator(func: Any) -> Any:
+            func._cmd_route = list(path)
+            return func
+
+        return decorator
+
     class BasePlugin:
         """替身版插件基类。"""
 
@@ -262,6 +307,8 @@ def install() -> None:
     base.BaseService = BaseService  # type: ignore[attr-defined]
     base.BaseTool = BaseTool  # type: ignore[attr-defined]
     base.BaseAction = BaseAction  # type: ignore[attr-defined]
+    base.BaseCommand = BaseCommand  # type: ignore[attr-defined]
+    base.cmd_route = cmd_route  # type: ignore[attr-defined]
     base.BasePlugin = BasePlugin  # type: ignore[attr-defined]
     base.register_plugin = register_plugin  # type: ignore[attr-defined]
 

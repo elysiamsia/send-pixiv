@@ -1,7 +1,7 @@
-"""聊天指令解析的单元测试。
+"""`core/commands.py` 的单元测试。
 
-对应 `#r18 关键词` 这个功能：用户主动发指令直接搜图，
-比"等 LLM 决定调用工具"更可靠。
+前缀识别与路由现在归框架的 Command 组件管（见 `test_command_component.py`），
+这里只测留在核心模块里的两样：分级收敛与用法文案。
 """
 
 from __future__ import annotations
@@ -13,86 +13,11 @@ from plugin_loader import load_package
 load_package()
 
 from send_pixiv_under_test.core.commands import (  # noqa: E402
-    Command,
+    RATING_ORDER,
+    USAGE,
     effective_rating,
-    parse_command,
     rating_rank,
 )
-
-
-class ParseCommandTest(unittest.TestCase):
-    """`parse_command` 的用例。"""
-
-    def test_r18_basic(self) -> None:
-        cmd = parse_command("#r18 猫")
-        self.assertIsNotNone(cmd)
-        assert cmd is not None
-        self.assertEqual(cmd.kind, "r18")
-        self.assertEqual(cmd.keyword, "猫")
-        self.assertEqual(cmd.requested_rating, "r18")
-
-    def test_r18_case_insensitive(self) -> None:
-        for text in ("#R18 猫", "#r18 猫", "#R18 猫"):
-            cmd = parse_command(text)
-            self.assertIsNotNone(cmd, text)
-            assert cmd is not None
-            self.assertEqual(cmd.kind, "r18")
-
-    def test_normal_prefix(self) -> None:
-        cmd = parse_command("#pixiv 风景")
-        self.assertIsNotNone(cmd)
-        assert cmd is not None
-        self.assertEqual(cmd.kind, "normal")
-        self.assertEqual(cmd.keyword, "风景")
-        self.assertEqual(cmd.requested_rating, "", "普通指令不该要求分级")
-
-    def test_keyword_may_contain_spaces(self) -> None:
-        cmd = parse_command("#r18 猫 少女")
-        self.assertIsNotNone(cmd)
-        assert cmd is not None
-        self.assertEqual(cmd.keyword, "猫 少女")
-
-    def test_prefix_only_gives_empty_keyword(self) -> None:
-        "只给前缀时返回空关键词，由调用方回用法提示。"
-        cmd = parse_command("#r18")
-        self.assertIsNotNone(cmd)
-        assert cmd is not None
-        self.assertEqual(cmd.keyword, "")
-
-    def test_leading_whitespace_ok(self) -> None:
-        cmd = parse_command("   #r18 猫")
-        self.assertIsNotNone(cmd)
-
-    def test_prefix_must_be_at_start(self) -> None:
-        "句中的 #r18 不算指令。"
-        self.assertIsNone(parse_command("帮我找 #r18 猫"))
-        self.assertIsNone(parse_command("看看这个#r18 猫"))
-
-    def test_longer_prefix_not_eaten(self) -> None:
-        "#r18g 不能被 #r18 吃掉（后面紧跟字母，不是空白）。"
-        self.assertIsNone(parse_command("#r18g 猫"))
-
-    def test_no_prefix(self) -> None:
-        self.assertIsNone(parse_command(""))
-        self.assertIsNone(parse_command("普通消息"))
-        self.assertIsNone(parse_command("#其他 猫"))
-
-    def test_custom_prefixes(self) -> None:
-        cmd = parse_command("搞颜色 猫", r18_prefixes=["搞颜色"], normal_prefixes=[])
-        self.assertIsNotNone(cmd)
-        assert cmd is not None
-        self.assertEqual(cmd.kind, "r18")
-        self.assertEqual(cmd.keyword, "猫")
-
-    def test_longer_prefix_wins(self) -> None:
-        "同时配了 #r18 与 #r18g 时，长的优先。"
-        cmd = parse_command("#r18g 猫", r18_prefixes=["#r18", "#r18g"])
-        self.assertIsNotNone(cmd)
-        assert cmd is not None
-        self.assertEqual(cmd.keyword, "猫")
-
-    def test_empty_prefixes_ignored(self) -> None:
-        self.assertIsNone(parse_command("#r18 猫", r18_prefixes=["", "  "], normal_prefixes=[]))
 
 
 class EffectiveRatingTest(unittest.TestCase):
@@ -114,6 +39,7 @@ class EffectiveRatingTest(unittest.TestCase):
         self.assertTrue(reason)
 
     def test_empty_request_uses_cap(self) -> None:
+        "`#pixiv` 不要求分级，用会话默认。"
         self.assertEqual(effective_rating("", "safe"), ("safe", ""))
         self.assertEqual(effective_rating("", "all"), ("all", ""))
 
@@ -122,26 +48,23 @@ class EffectiveRatingTest(unittest.TestCase):
         self.assertEqual(rating_rank("乱写"), 0)
         self.assertEqual(rating_rank(""), 0)
 
+    def test_rank_order(self) -> None:
+        self.assertLess(rating_rank("safe"), rating_rank("r18"))
+        self.assertLess(rating_rank("r18"), rating_rank("all"))
+        self.assertEqual(len(RATING_ORDER), 3)
 
-class NoSelfTriggerTest(unittest.TestCase):
-    """防回环：机器人自己发的回执不能被当成指令。"""
 
-    def test_usage_hint_is_not_a_command(self) -> None:
-        from send_pixiv_under_test.core.commands import USAGE  # noqa: PLC0415
+class UsageSafetyTest(unittest.TestCase):
+    """回执文案不能自己触发自己。"""
 
-        self.assertIsNone(
-            parse_command(USAGE),
-            "用法提示以 #r18 开头的话，机器人会自己触发自己",
-        )
+    def test_usage_has_no_command_prefix(self) -> None:
+        "机器人自己发的消息也会走一遍事件链，文案以命令前缀开头就会形成回环。"
+        stripped = USAGE.lstrip()
+        self.assertFalse(stripped.startswith("#"))
+        self.assertFalse(stripped.startswith("/"))
 
-    def test_other_replies_are_not_commands(self) -> None:
-        for text in (
-            "当前会话最高只允许 safe 级别。要发 R-18 请把本会话加进 plugin.r18_streams",
-            "没搜到「猫」的图，换个词试试？",
-            "手速太快啦，12 秒后再试",
-            "🎨 标题\n👤 作者\n🔗 https://www.pixiv.net/artworks/1",
-        ):
-            self.assertIsNone(parse_command(text), text)
+    def test_usage_mentions_the_command(self) -> None:
+        self.assertIn("#r18", USAGE)
 
 
 if __name__ == "__main__":

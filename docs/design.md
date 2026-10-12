@@ -327,3 +327,71 @@ ClientSettings(enableEch: true, requireEch: true,
 **注意**：API（搜索、详情、刷新令牌）仍然必须走代理，这一点没有绕过。
 `direct_image` 省的是图片流量，不是让整个插件脱离代理。
 
+
+
+## 10. 指令为什么是 Command 而不是 EventHandler
+
+需求来自一次实测：插件发完图之后，LLM **又**回了一句"r18 这条线我可不会踩哦"，
+看着很怪。用户的原话是"可以让 actor 不处理指令的消息"。
+
+### 10.1 框架里已经有现成机制
+
+`src/core/transport/distribution/distributor.py` 在 `ON_MESSAGE_RECEIVED`
+的处理函数开头有这么一段：
+
+```python
+cmd_mgr = get_command_manager()
+_path, matched_cls, _args = cmd_mgr.match_command(text)
+if matched_cls is not None:
+    success, result = await cmd_mgr.execute_command(message=message)
+    logger.debug(f"命令已分发: ...")
+    return EventDecision.SUCCESS, params   # ← 直接返回，不注入聊天流
+```
+
+也就是说：**注册成 Command 的消息执行完就返回了，根本不会进入聊天流**，
+chatter 自然看不到它。这正是"让 actor 不处理指令消息"的标准做法。
+
+对比一下我们先前用 EventHandler 的方案：消息照样注入聊天流，模型照样能看到，
+只是插件同时也处理了一遍——于是两边都说话。
+
+### 10.2 EventHandler + STOP 的诱惑与代价
+
+`EventDecision` 有三种（`src/kernel/event/core.py`）：
+
+| 值 | 含义 |
+| --- | --- |
+| `SUCCESS` | 正常执行完，更新共享参数并交给下一个订阅者 |
+| `STOP` | 执行完后**立刻终止**，不再继续后续订阅者 |
+| `PASS` | 跳过（不更新共享参数），直接交给下一个订阅者 |
+
+理论上 EventHandler 只要返回 `STOP` 也能拦住 distributor。但它拦的是
+**整条事件链**：我们的 handler 优先级 54，后面还有十几个别的插件的处理器
+（roamer 的兴趣打分、time_sense、file_reader……）全都收不到这条消息。
+为了拦一条指令去牺牲别的插件的记账，代价太大。
+
+Command 路线只影响 distributor 自己那一步，别的插件照常收消息。
+
+### 10.3 落地细节
+
+- `commands/pixiv_command.py` 里两条：`PixivR18Command`（name=`r18`）与
+  `PixivSearchCommand`（name=`pixiv`），共用内部基类 `_PixivCommandBase`。
+- **前缀**：`CommandManager._command_prefixes` 默认只有 `/`。插件在
+  `on_plugin_loaded` 里读出当前值再**追加** `#`（`command_api.set_prefixes`），
+  不替换，避免踩掉别处配的前缀。可配置关闭。
+- **重写 `execute()`**：框架默认走 Trie 路由，`_call_handler` 按位置逐个传参，
+  多词关键词（`#r18 猫 少女`）只会传进去第一个词。这里直接重写 `execute()`，
+  把 name 之后的整段文本当关键词。
+- **回执要自己发**：`execute_command` 只把 `(success, result)` 记进日志，
+  不会替命令发消息，所以提示语由命令自己 `send_text`。
+- **回执文案不能以命令前缀开头**，否则机器人自己发出的消息会再被当成命令（回环）。
+
+### 10.4 顺带修好的静态校验
+
+这次改动暴露了校验器的两个盲区，都补上了：
+
+1. **间接继承**：组件常继承插件内部的公共基类（`PixivR18Command` →
+   `_PixivCommandBase` → `BaseCommand`），只认直接基类会漏判。
+   现在会沿继承链解析。
+2. **内部基类误判**：`_PixivCommandBase` 以 `_` 开头，是抽象基类不是组件，
+   现在会被跳过。
+

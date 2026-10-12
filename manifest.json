@@ -59,8 +59,14 @@
       "enabled": true
     },
     {
-      "component_type": "event_handler",
-      "component_name": "pixiv_command_watcher",
+      "component_type": "command",
+      "component_name": "r18",
+      "dependencies": [],
+      "enabled": true
+    },
+    {
+      "component_type": "command",
+      "component_name": "pixiv",
       "dependencies": [],
       "enabled": true
     }
