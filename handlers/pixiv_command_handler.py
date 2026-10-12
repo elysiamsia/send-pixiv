@@ -103,7 +103,10 @@ class PixivCommandWatcher(BaseEventHandler):
         platform = message.platform or ""
 
         key = f"cmd:{command.kind}:{command.keyword}"
-        if not plugin.debouncer.hit(stream_id, key, ttl=cfg.trigger.debounce_seconds):
+        # 用 first_sight 而不是 `not hit()`：后者读起来太容易搞反
+        # （实测就把新指令全丢了，只放行重复的）。
+        if not plugin.debouncer.first_sight(stream_id, key, ttl=cfg.trigger.debounce_seconds):
+            logger.debug(f"[send-pixiv] 指令 {key} 在防抖窗口内，跳过")
             return
 
         def abort(reason: str) -> None:

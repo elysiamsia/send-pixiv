@@ -287,6 +287,23 @@ class Debouncer:
             return False
         return last is not None and (now - last) < window
 
+    def first_sight(self, namespace: str, key: str, ttl: float | None = None) -> bool:
+        """是不是第一次见到它。
+
+        和 :meth:`hit` 是反的，但读起来不容易搞错——
+        `if debouncer.first_sight(...): 处理` 比 `if not debouncer.hit(...)` 直观。
+        实测踩过：把 `hit()` 当"命中即处理"用，结果每条新指令都被丢掉。
+
+        Args:
+            namespace: 命名空间。
+            key: 被去重的键。
+            ttl: 覆盖实例默认窗口的秒数。
+
+        Returns:
+            首次见到返回 `True`。
+        """
+        return not self.hit(namespace, key, ttl=ttl)
+
     def forget(self, namespace: str, key: str) -> None:
         """撤销一次去重记录。
 

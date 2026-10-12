@@ -90,6 +90,23 @@ class DebouncerTest(unittest.TestCase):
         debouncer.forget("s1", "illust:1")
         self.assertFalse(debouncer.hit("s1", "illust:1"))
 
+    def test_first_sight_is_the_inverse(self) -> None:
+        """`first_sight` 就是 `not hit`，但读起来不会搞反。
+
+        实测踩过：指令 handler 里写成 `if not hit(...): return`，
+        等于「不是重复才返回」，把每条新指令都丢掉了。
+        """
+        debouncer = Debouncer(ttl_seconds=60)
+        self.assertTrue(debouncer.first_sight("s1", "cmd:r18:猫"))
+        self.assertFalse(debouncer.first_sight("s1", "cmd:r18:猫"))
+
+    def test_first_sight_records_like_hit(self) -> None:
+        "走 first_sight 也要留下记录，否则 forget 无从下手。"
+        debouncer = Debouncer(ttl_seconds=60)
+        debouncer.first_sight("s1", "cmd:r18:猫")
+        debouncer.forget("s1", "cmd:r18:猫")
+        self.assertTrue(debouncer.first_sight("s1", "cmd:r18:猫"))
+
 
 if __name__ == "__main__":
     unittest.main()
