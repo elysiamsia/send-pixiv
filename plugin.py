@@ -47,6 +47,24 @@ _T = TypeVar("_T")
 #: 配置缺失时使用的兜底策略：一切请求都拒绝，但不会抛异常。
 _FALLBACK_POLICY = Policy(enabled=False)
 
+#: `_resolve_proxy` 用它表示"代理来自用户配置"。
+PROXY_SOURCE_CONFIG = "配置文件"
+
+
+def proxy_label(source: str) -> str:
+    """给日志用：这个代理是用户配的，还是插件自己探测出来的。
+
+    两者出问题时的处理方式不同——用户配的要他去查，插件探测的要提醒他
+    这层是自动接上的（可能不是他想要的那个代理）。
+
+    Args:
+        source: `_resolve_proxy` 返回的来源说明。
+
+    Returns:
+        可直接拼进句子的短语。
+    """
+    return "配置的代理" if source == PROXY_SOURCE_CONFIG else "自动探测到的代理"
+
 
 @register_plugin
 class SendPixivPlugin(BasePlugin):
@@ -195,7 +213,7 @@ class SendPixivPlugin(BasePlugin):
                     "而 httpx 不支持 SOCKS——请改成同一个客户端的 HTTP 代理端口"
                     "（Clash 的混合端口通常两者都支持，把 socks5:// 换成 http:// 即可）"
                 )
-            return configured, "配置文件"
+            return configured, PROXY_SOURCE_CONFIG
 
         detected, source = detect_system_proxy()
         if not detected:
@@ -246,8 +264,8 @@ class SendPixivPlugin(BasePlugin):
         except Exception as exc:  # noqa: BLE001 - 自检失败只提示，不影响加载
             if proxy:
                 logger.warning(
-                    f"[send-pixiv] 网络自检失败：配置的代理 {proxy} 连不上 pixiv（{exc}）。"
-                    "请确认代理软件正在运行、地址与端口没写错"
+                    f"[send-pixiv] 网络自检失败：{proxy_label(self._proxy_source)} {proxy} "
+                    f"连不上 pixiv（{exc}）。请确认代理软件正在运行、地址与端口没写错"
                 )
             else:
                 logger.warning(

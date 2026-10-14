@@ -282,11 +282,19 @@ def install() -> None:
         return decorator
 
     class BasePlugin:
-        """替身版插件基类。"""
+        """替身版插件基类。
 
-        def __init__(self) -> None:
-            """初始化。"""
-            self.config: Any = None
+        真实框架是把配置实例注入进来的（`BasePlugin(config)`），替身也要收，
+        否则没法离线测插件自己的决策逻辑（例如"代理该用配置的还是探测的"）。
+        """
+
+        def __init__(self, config: Any = None) -> None:
+            """初始化。
+
+            Args:
+                config: 由插件管理器注入的配置实例。
+            """
+            self.config: Any = config
 
     def register_plugin(cls):
         """替身版注册装饰器，原样返回。
