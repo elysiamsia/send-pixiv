@@ -27,10 +27,20 @@ from urllib.parse import urlsplit
 
 import httpx
 
+from .errors import (
+    REAUTH_HINT,
+    PixivAuthError,
+    PixivError,
+    PixivNetworkError,
+    PixivNotFoundError,
+    PixivRateLimitError,
+)
 from .models import Illust
 from .no_sni import make_no_sni_context
 from .token import TokenStore
 
+#: 异常类与话术层都在 :mod:`.errors`（那边不依赖网络层，避免循环 import）。
+#: 这里原样再导出，旧的 `from .client import PixivAuthError` 继续可用。
 __all__ = [
     "PixivClient",
     "PixivError",
@@ -81,26 +91,6 @@ APP_HEADERS: Final = {
     "App-Version": "7.13.3",
     "Referer": IMAGE_REFERER,
 }
-
-
-class PixivError(Exception):
-    """pixiv 相关错误基类。"""
-
-
-class PixivAuthError(PixivError):
-    """凭据无效或过期，需要重新登录拿 refresh_token。"""
-
-
-class PixivNotFoundError(PixivError):
-    """作品不存在、已删除或不可见。"""
-
-
-class PixivRateLimitError(PixivError):
-    """被 pixiv 限流（HTTP 429）。"""
-
-
-class PixivNetworkError(PixivError):
-    """网络层错误（超时、连接失败、代理不可用）。"""
 
 
 class PixivClient:
@@ -247,8 +237,8 @@ class PixivClient:
                     # 只给了 access_token：无从刷新，用到 401 为止。
                     return self._access_token
                 raise PixivAuthError(
-                    "未配置 pixiv 凭据：请先跑 python scripts/pixiv_login.py 完成一次浏览器授权，"
-                    "或把 refresh_token 填进插件配置"
+                    "未配置 pixiv 凭据：请把 refresh_token 填进插件配置的 pixiv.refresh_token"
+                    f"（{REAUTH_HINT}）"
                 )
 
             return await self._refresh_access_token()
@@ -276,13 +266,17 @@ class PixivClient:
             try:
                 response = await self.client.post(OAUTH_URL, data=payload, headers=headers)
             except httpx.HTTPError as exc:
-                last_error = PixivNetworkError(f"连接 pixiv 认证端点失败: {exc}（直连不通时请配置代理）")
+                # 只说技术事实。"该配代理"还是"该查代理"由话术层
+                # （core.errors.network_hint）按实际代理配置给出——写死一句
+                # "请配置代理"会误导已经配了代理、只是代理挂了的用户。
+                last_error = PixivNetworkError(f"连接 pixiv 认证端点失败: {exc}")
                 await self._backoff(attempt, base=1.0)
                 continue
 
             if response.status_code in (400, 401, 403):
                 raise PixivAuthError(
-                    f"refresh_token 无效或已过期（HTTP {response.status_code}），请重新登录 pixiv 获取新的 token"
+                    f"refresh_token 无效或已过期（HTTP {response.status_code}），"
+                    f"需要重新授权换一个新的（{REAUTH_HINT}）"
                 )
             if response.status_code != 200:
                 last_error = PixivError(
@@ -375,9 +369,7 @@ class PixivClient:
             except PixivAuthError:
                 raise
             except httpx.HTTPError as exc:
-                last_error = PixivNetworkError(
-                    f"请求 pixiv 失败: {exc}（直连不通时请配置代理）"
-                )
+                last_error = PixivNetworkError(f"请求 pixiv 失败: {exc}")
                 await self._backoff(attempt)
                 continue
 
@@ -626,7 +618,7 @@ class PixivClient:
             try:
                 response = await client.get(target, headers=headers)
             except httpx.HTTPError as exc:
-                last_error = PixivNetworkError(f"下载图片失败: {exc}")
+                last_error = PixivNetworkError(f"下载图片失败: {exc}（直连与代理都没走通）")
                 await self._backoff(attempt)
                 continue
 

@@ -47,6 +47,7 @@ from src.app.plugin_system.api.send_api import send_text
 from src.app.plugin_system.base import BaseCommand
 
 from ..core.commands import USAGE, effective_rating
+from ..core.errors import friendly
 from ..core.runtime import resolve_own_plugin
 from ..services.pixiv_service import PixivService
 
@@ -123,11 +124,13 @@ async def _deliver(
                 plugin.mark_sent(stream_id, illust.id)
             return
 
-        detail = "；".join(outcome.skipped[:2]) or "可能都被分级过滤掉了"
+        # 截断一下：skipped 里可能是带引导的长文案，别把群刷屏
+        detail = "；".join(outcome.skipped[:2])[:200] or "可能都被分级过滤掉了"
         await _reply(stream_id, f"搜到了但一张都没发出去（{detail}）")
     except Exception as exc:  # noqa: BLE001 - 后台任务必须自己兜住异常
         logger.warning(f"[send-pixiv] 指令处理失败 {keyword!r}: {exc}")
-        await _reply(stream_id, f"搜索失败了：{exc}")
+        # 群里只发人话，技术原文留给日志（core.errors 的注释里写了为什么）
+        await _reply(stream_id, f"搜索失败了：{friendly(exc, proxy=plugin.effective_proxy)}")
 
 
 async def _run(

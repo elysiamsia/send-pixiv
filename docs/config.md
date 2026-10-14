@@ -46,18 +46,27 @@ r18_streams = ["你的QQ号"]            # 私聊允许 R-18
 
 | 键 | 类型 | 默认 | 说明 |
 | --- | --- | --- | --- |
-| `refresh_token` | str | `""` | **必填**。pixiv 账号的 refresh_token |
+| `refresh_token` | str | `""` | **必填**。pixiv 账号的 refresh_token，获取方法见 [README 的「配置凭据」](../README.md) |
 | `access_token` | str | `""` | 可选，直接指定 access_token |
 | `token_path` | str | `"./data/send-pixiv/token.json"` | 轮换后 refresh_token 的落盘位置 |
-| `proxy` | str | `""` | 例如 `http://127.0.0.1:7890`；能直连就留空 |
+| `proxy` | str | `""` | 例如 `http://127.0.0.1:7890`。**大陆网络基本必须填**；留空时插件会自动探测本机系统代理（Windows 系统代理 / 环境变量），探测到会打日志告知。**不支持 `socks://`**（httpx 限制），请填 HTTP 代理端口 |
 | `user_agent` | str | `PixivAndroidApp/5.0.234 (Android 11; Pixel 6)` | 请求头，别乱改 |
 | `timeout_seconds` | float | `20.0` | 单次请求超时 |
-| `min_interval_seconds` | float | `1.2` | 两次 API 调用的最小间隔，自我限流 |
+| `min_interval_seconds` | float | `1.2` | 两次 API 调用的最小间隔，自我限流（**全局生效**，多群并发会排队） |
 | `max_retries` | int | `3` | 单请求最大尝试次数 |
 
 **关于凭据安全**：`refresh_token` 等同于账号凭据。它既会出现在 `config.toml`，
 也会被轮换副本写进 `data/send-pixiv/token.json`。这两个文件都不要进版本库
 （本仓库的 `.gitignore` 已经排除 `data/`，但 bot 那边是你自己的仓库，要自己盯）。
+
+**关于代理**：插件加载时会做一次轻量网络自检，结果直接写进日志——
+
+```text
+[send-pixiv] 网络自检通过：能连上 pixiv（代理：http://127.0.0.1:7890）
+[send-pixiv] 网络自检失败：连不上 pixiv。大陆网络下 pixiv 的 API 域名无法直连，必须配置代理……
+```
+
+所以"装完没反应"时，先去看日志里这两行之一，比反复试更快。
 
 ## [download] 下载与缓存
 

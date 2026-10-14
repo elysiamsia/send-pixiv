@@ -61,9 +61,9 @@ class SendPixivConfig(BaseConfig):
         refresh_token: str = Field(
             default="",
             description=(
-                "pixiv 账号的 refresh_token（必填）。"
-                "用本仓库的 python scripts/pixiv_login.py 跑一次浏览器授权即可拿到；"
-                "也可以留空，直接让登录脚本把 token 写进 token_path"
+                "pixiv 账号的 refresh_token（必填）。获取方法见项目 README 的「配置凭据」一节"
+                "（仓库里的 scripts/pixiv_login.py 跑一次浏览器授权即可；"
+                "也可以留空，直接让登录脚本把 token 写进 token_path）"
             ),
         )
         access_token: str = Field(
@@ -76,7 +76,12 @@ class SendPixivConfig(BaseConfig):
         )
         proxy: str = Field(
             default="",
-            description="访问 pixiv 的 HTTP(S) 代理，例如 http://127.0.0.1:7890；直连能通就留空",
+            description=(
+                "访问 pixiv 的 HTTP(S) 代理，例如 http://127.0.0.1:7890。"
+                "**大陆网络基本必须填**——pixiv 的 API 域名无法直连；"
+                "留空时插件会自动探测本机系统代理（Windows 系统代理 / 环境变量），"
+                "探测到会打日志告知。注意 httpx 不支持 socks://，请填 HTTP 代理端口"
+            ),
         )
         user_agent: str = Field(
             default="PixivAndroidApp/5.0.234 (Android 11; Pixel 6)",
@@ -92,7 +97,7 @@ class SendPixivConfig(BaseConfig):
             default=1.2,
             ge=0,
             le=10,
-            description="两次 API 调用之间的最小间隔秒数，用于自我限流",
+            description="两次 API 调用之间的最小间隔秒数，用于自我限流（全局生效，多群并发会排队）",
         )
         max_retries: int = Field(
             default=3,

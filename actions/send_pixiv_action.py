@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING, Annotated
 from src.app.plugin_system.api.log_api import get_logger
 from src.app.plugin_system.base import BaseAction
 
+from ..core.errors import friendly
 from ..core.runtime import resolve_own_plugin
 from ..services.pixiv_service import PixivService
 
@@ -106,7 +107,9 @@ class SendPixivIllustAction(BaseAction):
             )
         except Exception as exc:  # noqa: BLE001 - 失败信息要能回到模型
             logger.warning(f"[send-pixiv] 解析失败 url={url!r} keyword={keyword!r}: {exc}")
-            return False, f"没找到可发送的作品：{exc}"
+            # 这个字符串会原样进模型上下文、也可能被模型复述给用户，
+            # 所以同样走话术层（技术原文已进日志）。
+            return False, f"没找到可发送的作品：{friendly(exc, proxy=plugin.effective_proxy)}"
 
         if not illusts:
             return False, "没找到符合条件的作品（可能被分级或 AI 过滤挡掉了）"

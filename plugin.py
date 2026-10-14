@@ -29,8 +29,9 @@ from src.kernel.concurrency import get_task_manager
 from .actions import SendPixivIllustAction
 from .config import SendPixivConfig
 from .core.cache import ImageCache
-from .core.client import PixivClient
+from .core.client import APP_API_BASE, APP_HEADERS, PixivClient
 from .core.policy import Debouncer, Policy
+from .core.proxy import detect_system_proxy, is_supported
 from .core.token import TokenStore
 from .commands import PixivR18Command, PixivSearchCommand
 from .handlers import PixivLinkWatcher
@@ -69,6 +70,10 @@ class SendPixivPlugin(BasePlugin):
         self._debouncer = Debouncer()
         #: `{聊天流: {作品ID: 发送时间}}`，供"同一个关键词换图"排序用。
         self._sent: dict[str, dict[int, float]] = {}
+        #: 实际生效的代理地址（配置值优先，其次自动探测到的系统代理）。
+        self._proxy: str = ""
+        #: 代理来源说明，用于日志与话术层。
+        self._proxy_source: str = ""
 
     # ------------------------------------------------------------------
     # 组件声明
@@ -144,11 +149,12 @@ class SendPixivPlugin(BasePlugin):
             )
 
         if self._client is None:
+            self._proxy, self._proxy_source = self._resolve_proxy(cfg)
             self._client = PixivClient(
                 refresh_token=cfg.pixiv.refresh_token,
                 access_token=cfg.pixiv.access_token,
                 user_agent=cfg.pixiv.user_agent,
-                proxy=cfg.pixiv.proxy,
+                proxy=self._proxy,
                 timeout=cfg.pixiv.timeout_seconds,
                 min_interval=cfg.pixiv.min_interval_seconds,
                 max_retries=cfg.pixiv.max_retries,
@@ -166,6 +172,92 @@ class SendPixivPlugin(BasePlugin):
                 self._cache.ensure_root()
             except OSError as exc:
                 logger.warning(f"[send-pixiv] 创建缓存目录失败: {exc}")
+
+    def _resolve_proxy(self, cfg: SendPixivConfig) -> tuple[str, str]:
+        """决定这次用哪个代理。
+
+        配置里写了就用配置的；**没写时自动探测系统代理**——大多数 Windows 用户
+        只会打开代理软件（Clash / v2rayN / sing-box）的「系统代理」开关，
+        那写的是注册表，而 httpx 只认环境变量、读不到。不探测的话，
+        他们明明挂着代理，插件却仍然直连、必然失败，最后只会觉得"这插件没用"。
+
+        Args:
+            cfg: 插件配置。
+
+        Returns:
+            `(代理地址, 来源说明)`；都没有返回 `("", "")`。
+        """
+        configured = (cfg.pixiv.proxy or "").strip()
+        if configured:
+            if not is_supported(configured):
+                logger.warning(
+                    f"[send-pixiv] pixiv.proxy 填的是 SOCKS 代理（{configured}），"
+                    "而 httpx 不支持 SOCKS——请改成同一个客户端的 HTTP 代理端口"
+                    "（Clash 的混合端口通常两者都支持，把 socks5:// 换成 http:// 即可）"
+                )
+            return configured, "配置文件"
+
+        detected, source = detect_system_proxy()
+        if not detected:
+            return "", ""
+        if not is_supported(detected):
+            logger.warning(
+                f"[send-pixiv] 探测到{source}是 SOCKS 代理（{detected}），"
+                "httpx 不支持，已忽略——请在 pixiv.proxy 里填 HTTP 代理端口"
+            )
+            return "", ""
+        logger.info(
+            f"[send-pixiv] pixiv.proxy 未配置，已自动使用{source}：{detected}"
+            "（要固定下来请显式写进配置）"
+        )
+        return detected, source
+
+    @property
+    def effective_proxy(self) -> str:
+        """实际生效的代理地址。
+
+        话术层（:func:`..core.errors.friendly`）用它来决定提示
+        "去配代理"还是"去查代理"——两者要做的事完全不同。
+
+        Returns:
+            代理地址；直连时为空串。
+        """
+        self._ensure_runtime()
+        return self._proxy
+
+    async def _selfcheck_network(self) -> None:
+        """加载后做一次轻量网络自检。
+
+        目的是把"配错了"这件事**当场**暴露在日志里，而不是等几天后某个群友
+        第一次发图时才炸——那时用户只会觉得"这插件没用"，然后卸载。
+
+        只打一次 GET（预期 403/404 也算通），不碰凭据、不产生副作用。
+        """
+        client = self._client
+        if client is None:
+            return
+        proxy = self._proxy
+        try:
+            await client.client.get(
+                f"{APP_API_BASE}/",
+                headers=APP_HEADERS,
+                timeout=8.0,
+            )
+        except Exception as exc:  # noqa: BLE001 - 自检失败只提示，不影响加载
+            if proxy:
+                logger.warning(
+                    f"[send-pixiv] 网络自检失败：配置的代理 {proxy} 连不上 pixiv（{exc}）。"
+                    "请确认代理软件正在运行、地址与端口没写错"
+                )
+            else:
+                logger.warning(
+                    "[send-pixiv] 网络自检失败：连不上 pixiv。大陆网络下 pixiv 的 API 域名"
+                    "无法直连，**必须配置代理**——把代理地址填进 "
+                    "config/plugins/send-pixiv/config.toml 的 pixiv.proxy"
+                    "（例如 http://127.0.0.1:7890），详见 README「大陆网络怎么配」"
+                )
+            return
+        logger.info(f"[send-pixiv] 网络自检通过：能连上 pixiv（代理：{proxy or '直连'}）")
 
     # ------------------------------------------------------------------
     # 给组件用的小工具
@@ -293,9 +385,12 @@ class SendPixivPlugin(BasePlugin):
 
         if not self._has_credential(cfg):
             logger.warning(
-                "[send-pixiv] 尚未配置 pixiv 凭据：请在配置里填 refresh_token，"
-                "或先跑 python scripts/pixiv_login.py 完成一次浏览器授权"
+                "[send-pixiv] 尚未配置 pixiv 凭据：请在 config/plugins/send-pixiv/config.toml "
+                "里填 pixiv.refresh_token（获取方法见项目 README 的「配置凭据」一节）"
             )
+
+        # 网络自检丢后台：不阻塞加载，失败也只提示（详见 _selfcheck_network）
+        self.spawn(self._selfcheck_network(), name="send-pixiv-selfcheck")
 
         # 注意：框架的 Logger.info(message, **kwargs) 只接受一个位置参数，
         # 不能像标准 logging 那样写 printf 风格（会报

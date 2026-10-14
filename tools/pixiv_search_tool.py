@@ -11,6 +11,7 @@ from typing import Annotated
 from src.app.plugin_system.api.log_api import get_logger
 from src.app.plugin_system.base import BaseTool
 
+from ..core.errors import friendly
 from ..core.rating import classify, filter_by_mode
 from ..core.runtime import resolve_own_plugin
 from ..services.pixiv_service import PixivService
@@ -65,7 +66,7 @@ class PixivSearchTool(BaseTool):
             illusts = await service.resolve(keyword=keyword.strip(), count=fetch)
         except Exception as exc:  # noqa: BLE001 - 统一转成模型可读的失败信息
             logger.warning(f"[send-pixiv] 搜索失败 keyword={keyword!r}: {exc}")
-            return False, f"pixiv 搜索失败：{exc}"
+            return False, f"pixiv 搜索失败：{friendly(exc, proxy=plugin.effective_proxy)}"
 
         allowed = filter_by_mode(illusts, mode)[:limit]
         if not allowed:

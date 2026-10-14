@@ -99,9 +99,15 @@ python scripts/build_mfp.py
 
 ### 配置凭据
 
+> **先看这里**：拿 refresh_token 要用本仓库的 `scripts/pixiv_login.py`。
+> 如果你是通过**插件市场 / 手动装 .mfp** 安装的，bot 的 `plugins/` 目录里
+> **没有** `scripts/`（打包时刻意排除了它）——请把仓库 clone 下来（或下载单个脚本），
+> 在仓库目录里跑下面的命令即可，脚本会自己把 token 写进插件的数据目录。
+
 跑一次浏览器授权，拿到 refresh_token：
 
 ```bash
+git clone https://github.com/elysiamsia/send-pixiv.git && cd send-pixiv
 python scripts/pixiv_login.py --proxy http://127.0.0.1:7890   # 不需要代理就去掉 --proxy
 ```
 
@@ -109,6 +115,10 @@ python scripts/pixiv_login.py --proxy http://127.0.0.1:7890   # 不需要代理�
 `pixiv://account/login?code=...`，**浏览器打不开这种协议没关系，把地址栏整条 URL 复制回终端**即可。
 
 脚本会拿 code 换令牌并写进 `data/send-pixiv/token.json`，插件运行期直接用这份。
+
+> 拿到的 token 也可以手动填进 `config/plugins/send-pixiv/config.toml` 的
+> `pixiv.refresh_token`——两种方式都行，插件优先用 `token.json` 里那份（因为
+> pixiv 刷新时会**轮换** token，新值落在那里）。
 
 > **安全提示**：refresh_token 等同于账号凭据。它既在 `token.json` 里、也可能被你填进
 > `config.toml`——这两个文件都别提交进仓库、别发到群里。
@@ -265,6 +275,10 @@ enabled = true                     # 响应 #r18 / #pixiv 指令
 ---
 
 ## 大陆网络怎么配
+
+> **一句话**：大陆网络下**没有代理就用不了这个插件**——pixiv 的 API 域名被 SNI 封锁，
+> 搜索、作品详情、令牌刷新全都走不了。下面说的「图片直连」只是**省流量的优化**，
+> 救不了 API。
 
 Pixiv 在大陆是「DNS 投毒 + SNI 阻断」两道锁，**但不同域名处境不一样**（实测结论）：
 

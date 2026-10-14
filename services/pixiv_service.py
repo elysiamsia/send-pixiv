@@ -14,6 +14,7 @@ from src.app.plugin_system.api.log_api import get_logger
 from src.app.plugin_system.api.send_api import send_image, send_text
 from src.app.plugin_system.base import BaseService
 
+from ..core.errors import friendly
 from ..core.links import extract_refs
 from ..core.models import Illust, ImagePage
 from ..core.rating import filter_by_mode
@@ -229,6 +230,9 @@ class PixivService(BaseService):
         if not allowed:
             return outcome
 
+        # 话术层要按"有没有代理"给不同建议，这里取一次
+        proxy = self._plugin.effective_proxy
+
         for illust in allowed:
             if outcome.sent >= budget:
                 break
@@ -239,7 +243,11 @@ class PixivService(BaseService):
                     path = await self._fetch(illust, page, cfg.download.image_quality)
                 except Exception as exc:  # noqa: BLE001 - 单张失败不应中断整批
                     logger.warning(f"[send-pixiv] 下载失败 illust={illust.id} page={page.index}: {exc}")
-                    outcome.skipped.append(f"{illust.id} 第 {page.index + 1} 张下载失败")
+                    # 带上真实原因。之前统一写"下载失败"，把"图片体积超限"这类
+                    # **可操作**的信息也吞了——管理员会朝网络方向白排查。
+                    outcome.skipped.append(
+                        f"{illust.id} 第 {page.index + 1} 张：{friendly(exc, proxy=proxy)}"
+                    )
                     continue
 
                 if not await self._push(path, illust, stream_id=stream_id, reply_to=reply_to):
